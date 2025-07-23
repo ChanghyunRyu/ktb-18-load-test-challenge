@@ -3,6 +3,8 @@ import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
 import { LockIcon, ErrorCircleIcon, NetworkIcon, RefreshOutlineIcon, GroupIcon } from '@vapor-ui/icons';
 import { Button, Card, Text, Badge, Callout } from '@vapor-ui/core';
+import { Modal, ModalBody, ModalFooter } from '../components/ui/Modal';
+import { Input } from 'reactstrap';
 import { Flex, HStack, Stack, Box } from '../components/ui/Layout';
 import { StyledTable, StyledTableHead, StyledTableBody, StyledTableRow, StyledTableHeader, StyledTableCell } from '../components/ui/StyledTable';
 import socketService from '../services/socket';
@@ -179,6 +181,10 @@ function ChatRoomsComponent() {
   const [hasMore, setHasMore] = useState(true);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [joiningRoom, setJoiningRoom] = useState(false);
+  // 1. 모달 상태 및 핸들러 추가
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [currentModalRoomId, setCurrentModalRoomId] = useState(null);
+  const [password, setPassword] = useState('');
 
   // Refs
   const socketRef = useRef(null);
@@ -558,7 +564,19 @@ function ChatRoomsComponent() {
     };
   }, [currentUser, handleAuthError]);
 
-  const handleJoinRoom = async (roomId) => {
+  // 2. 입장 버튼 클릭 시 분기 처리
+  const handleJoinRoom = (roomId, hasPassword) => {
+    if (hasPassword) {
+      setCurrentModalRoomId(roomId);
+      setShowPasswordModal(true);
+      setPassword('');
+    } else {
+      joinRoom(roomId);
+    }
+  };
+
+  // 3. 서버로 비밀번호와 함께 입장 요청
+  const joinRoom = async (roomId, password = '') => {
     if (connectionStatus !== CONNECTION_STATUS.CONNECTED) {
       setError({
         title: '채팅방 입장 실패',
@@ -567,27 +585,25 @@ function ChatRoomsComponent() {
       });
       return;
     }
-
     setJoiningRoom(true);
-
     try {
-      const response = await axiosInstance.post(`/api/rooms/${roomId}/join`, {}, {
-        timeout: 5000
-      });
-      
+      const response = await axiosInstance.post(`/api/rooms/${roomId}/join`, password ? { password } : {}, { timeout: 5000 });
       if (response.data.success) {
         router.push(`/chat?room=${roomId}`);
+      } else {
+        setError({
+          title: '채팅방 입장 실패',
+          message: response.data.message || '입장에 실패했습니다.',
+          type: 'danger'
+        });
       }
     } catch (error) {
-      console.error('Room join error:', error);
-      
       let errorMessage = '입장에 실패했습니다.';
       if (error.response?.status === 404) {
         errorMessage = '채팅방을 찾을 수 없습니다.';
       } else if (error.response?.status === 403) {
         errorMessage = '채팅방 입장 권한이 없습니다.';
       }
-      
       setError({
         title: '채팅방 입장 실패',
         message: error.response?.data?.message || errorMessage,
@@ -595,9 +611,12 @@ function ChatRoomsComponent() {
       });
     } finally {
       setJoiningRoom(false);
+      setShowPasswordModal(false);
     }
   };
 
+  // 4. 테이블에서 입장 버튼에 분기 적용
+  // (renderRoomsTable 함수 내 Button onClick 부분을 아래로 교체)
   const renderRoomsTable = () => {
     if (!rooms || rooms.length === 0) return null;
     
@@ -645,7 +664,7 @@ function ChatRoomsComponent() {
                   color="primary"
                   variant="outline"
                   size="md"
-                  onClick={() => handleJoinRoom(room._id)}
+                  onClick={() => handleJoinRoom(room._id, room.hasPassword)}
                   disabled={connectionStatus !== CONNECTION_STATUS.CONNECTED}
                 >
                   입장
@@ -658,7 +677,7 @@ function ChatRoomsComponent() {
     );
   };
 
-
+  // 5. 비밀번호 입력 모달 구현 (return 문 내 적절한 위치에 추가)
   return (
     <div className="auth-container">
       <Card.Root className="chat-rooms-card">
@@ -775,6 +794,27 @@ function ChatRoomsComponent() {
             <Text typography="body1" style={{ color: 'white' }}>채팅방 입장 중...</Text>
           </Stack>
         </div>
+      )}
+      {showPasswordModal && (
+        <Modal
+          isOpen={showPasswordModal}
+          onClose={() => setShowPasswordModal(false)}
+          size="md"
+          title="비밀번호를 입력해주세요."
+        >
+          <ModalBody>
+            <Input
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              type="password"
+              style={{ color: 'black' }}
+            />
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" onClick={() => setShowPasswordModal(false)}>닫기</Button>
+            <Button variant="ghost" onClick={() => joinRoom(currentModalRoomId, password)}>확인</Button>
+          </ModalFooter>
+        </Modal>
       )}
     </div>
   );

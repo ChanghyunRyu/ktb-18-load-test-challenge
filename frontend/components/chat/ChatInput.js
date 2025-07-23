@@ -380,7 +380,18 @@ const ChatInput = forwardRef(({
     let newSelectionStart;
     let newSelectionEnd;
 
-    if (markdown.includes('\n')) {
+    // URL 마크다운 분기 처리
+    if (markdown === '[](url)') {
+      const displayText = selectedText || '링크텍스트';
+      // [텍스트](url) 형태로 삽입
+      newText = message.substring(0, start) + `[${displayText}](url)` + message.substring(end);
+      // url 부분의 시작 위치 계산
+      const urlStart = start + displayText.length + 3; // [ + displayText + ](
+      const urlEnd = urlStart + 3; // 'url' 길이만큼
+      newSelectionStart = urlStart;
+      newSelectionEnd = urlEnd;
+      newCursorPos = urlStart;
+    } else if (markdown.includes('\n')) {
       newText = message.substring(0, start) +
                 markdown.replace('\n\n', '\n' + selectedText + '\n') +
                 message.substring(end);
@@ -419,9 +430,13 @@ const ChatInput = forwardRef(({
     setTimeout(() => {
       if (messageInputRef.current) {
         input.focus();
-        input.setSelectionRange(newSelectionStart, newSelectionEnd);
-        if (selectedText) {
+        // URL 마크다운이면 url 부분을 선택
+        if (markdown === '[](url)') {
+          input.setSelectionRange(newSelectionStart, newSelectionEnd);
+        } else if (selectedText) {
           input.setSelectionRange(newCursorPos, newCursorPos);
+        } else {
+          input.setSelectionRange(newSelectionStart, newSelectionEnd);
         }
       }
     }, 0);
