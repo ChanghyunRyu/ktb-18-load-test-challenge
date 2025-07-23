@@ -307,6 +307,9 @@ const ChatInput = forwardRef(({
   }, [message, setMessage, setShowMentionList, messageInputRef]);
 
   const handleKeyDown = useCallback((e) => {
+    // 한글 등 IME 조합 중에는 Enter 처리하지 않음
+    if (e.nativeEvent.isComposing || e.isComposing) return;
+    
     if (showMentionList) {
       const participants = getFilteredParticipants(room); // room 객체 전달
       const participantsCount = participants.length;
