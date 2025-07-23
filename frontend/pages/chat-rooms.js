@@ -599,14 +599,19 @@ function ChatRoomsComponent() {
       }
     } catch (error) {
       let errorMessage = '입장에 실패했습니다.';
-      if (error.response?.status === 404) {
+      if (error.status === 404) {
         errorMessage = '채팅방을 찾을 수 없습니다.';
-      } else if (error.response?.status === 403) {
-        errorMessage = '채팅방 입장 권한이 없습니다.';
+      } else if (error.status === 403) {
+        errorMessage = '비밀번호가 일치하지 않습니다.';
+      } else if (error.status === 401) {
+        // 인증 만료/세션 만료 시 로그아웃 처리
+        await authService.logout();
+        router.replace('/?error=session_expired');
+        return;
       }
       setError({
         title: '채팅방 입장 실패',
-        message: error.response?.data?.message || errorMessage,
+        message: errorMessage,
         type: 'danger'
       });
     } finally {
