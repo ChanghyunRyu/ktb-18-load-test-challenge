@@ -34,6 +34,12 @@ router.delete('/profile-image',
   userController.deleteProfileImage
 );
 
+// 비밀번호 변경
+router.put('/change-password',
+  auth,
+  userController.changePassword
+);
+
 // 회원 탈퇴
 router.delete('/account',
   auth,
