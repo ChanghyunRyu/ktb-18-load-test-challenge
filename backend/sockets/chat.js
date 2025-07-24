@@ -130,12 +130,11 @@ module.exports = function(io) {
   const BATCH_SIZE = 30;  // 한 번에 로드할 메시지 수
   const DUPLICATE_LOGIN_TIMEOUT = 3000; // 중복 로그인 타임아웃 (3초)
 
-  // 로깅 유틸리티 함수
-  const logDebug = (action, data) => {
-    console.debug(`[Socket.IO] ${action}:`, {
-      ...data,
-      timestamp: new Date().toISOString()
-    });
+  // 로깅 유틸리티 함수 - 개발 환경에서만 작동
+  const logDebug = (action, data = {}) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.debug(`[Socket.IO] ${action}:`, data);
+    }
   };
 
   // 메시지 로드 함수 (단순화)
@@ -317,21 +316,27 @@ module.exports = function(io) {
   });
   
   io.on('connection', async (socket) => {
-    logDebug('socket connected', {
-      socketId: socket.id,
-      userId: socket.user?.id,
-      userName: socket.user?.name
-    });
+    if (process.env.NODE_ENV === 'development') {
+      logDebug('socket connected', {
+        socketId: socket.id,
+        userId: socket.user?.id,
+        userName: socket.user?.name
+      });
+    }
 
     if (socket.user) {
       // 이전 연결이 있는지 확인 (in-memory 사용)
       const previousSocketId = await socketState.getConnectedUser(socket.user.id);
-      console.log(`[DEBUG] User ${socket.user.id} connecting. Previous socketId: ${previousSocketId}, new socketId: ${socket.id}`);
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[DEBUG] User ${socket.user.id} connecting. Previous socketId: ${previousSocketId}, new socketId: ${socket.id}`);
+      }
       
       if (previousSocketId && previousSocketId !== socket.id) {
         const previousSocket = io.sockets.sockets.get(previousSocketId);
         if (previousSocket && previousSocket.connected) {
-          console.log(`[DEBUG] Found active previous connection for user ${socket.user.id}, terminating it`);
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`[DEBUG] Found active previous connection for user ${socket.user.id}, terminating it`);
+          }
           
           // 이전 연결에 중복 로그인 알림
           previousSocket.emit('duplicate_login', {
@@ -352,13 +357,17 @@ module.exports = function(io) {
             }
           }, DUPLICATE_LOGIN_TIMEOUT);
         } else {
-          console.log(`[DEBUG] Previous socketId ${previousSocketId} is not connected or not found, cleaning up`);
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`[DEBUG] Previous socketId ${previousSocketId} is not connected or not found, cleaning up`);
+          }
         }
       }
       
       // 새로운 연결 정보 저장 (in-memory 사용)
       await socketState.setConnectedUser(socket.user.id, socket.id);
-      console.log(`[DEBUG] Stored new connection for user ${socket.user.id} -> ${socket.id}`);
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[DEBUG] Stored new connection for user ${socket.user.id} -> ${socket.id}`);
+      }
     }
 
     // 소켓 에러 처리
@@ -386,10 +395,12 @@ module.exports = function(io) {
         }
 
         if (await socketState.getMessageQueue(queueKey)) {
-          logDebug('message load skipped - already loading', {
-            roomId,
-            userId: socket.user.id
-          });
+          if (process.env.NODE_ENV === 'development') {
+            logDebug('message load skipped - already loading', {
+              roomId,
+              userId: socket.user.id
+            });
+          }
           return;
         }
 
@@ -398,12 +409,14 @@ module.exports = function(io) {
 
         const result = await loadMessages(socket, roomId, before);
         
-        logDebug('previous messages loaded', {
-          roomId,
-          messageCount: result.messages.length,
-          hasMore: result.hasMore,
-          oldestTimestamp: result.oldestTimestamp
-        });
+        if (process.env.NODE_ENV === 'development') {
+          logDebug('previous messages loaded', {
+            roomId,
+            messageCount: result.messages.length,
+            hasMore: result.hasMore,
+            oldestTimestamp: result.oldestTimestamp
+          });
+        }
 
         socket.emit('previousMessagesLoaded', result);
 
@@ -428,20 +441,24 @@ module.exports = function(io) {
         // 이미 해당 방에 참여 중인지 확인 (in-memory 사용)
         const currentRoom = await socketState.getUserRoom(socket.user.id);
         if (currentRoom === roomId) {
-          logDebug('already in room', {
-            userId: socket.user.id,
-            roomId
-          });
+          if (process.env.NODE_ENV === 'development') {
+            logDebug('already in room', {
+              userId: socket.user.id,
+              roomId
+            });
+          }
           socket.emit('joinRoomSuccess', { roomId });
           return;
         }
 
         // 기존 방에서 나가기
         if (currentRoom) {
-          logDebug('leaving current room', { 
-            userId: socket.user.id, 
-            roomId: currentRoom 
-          });
+          if (process.env.NODE_ENV === 'development') {
+            logDebug('leaving current room', { 
+              userId: socket.user.id, 
+              roomId: currentRoom 
+            });
+          }
           socket.leave(currentRoom);
           await socketState.removeUserRoom(socket.user.id);
           
@@ -502,12 +519,14 @@ module.exports = function(io) {
         io.to(roomId).emit('message', joinMessage);
         io.to(roomId).emit('participantsUpdate', room.participants);
 
-        logDebug('user joined room', {
-          userId: socket.user.id,
-          roomId,
-          messageCount: messages.length,
-          hasMore
-        });
+        if (process.env.NODE_ENV === 'development') {
+          logDebug('user joined room', {
+            userId: socket.user.id,
+            roomId,
+            messageCount: messages.length,
+            hasMore
+          });
+        }
 
       } catch (error) {
         console.error('Join room error:', error);
@@ -558,13 +577,15 @@ module.exports = function(io) {
         const aiMentions = extractAIMentions(content);
         let message;
 
-        logDebug('message received', {
-          type,
-          room,
-          userId: socket.user.id,
-          hasFileData: !!fileData,
-          hasAIMentions: aiMentions.length
-        });
+        if (process.env.NODE_ENV === 'development') {
+          logDebug('message received', {
+            type,
+            room,
+            userId: socket.user.id,
+            hasFileData: !!fileData,
+            hasAIMentions: aiMentions.length
+          });
+        }
 
         // 메시지 타입별 처리
         switch (type) {
@@ -636,11 +657,13 @@ module.exports = function(io) {
 
         await SessionService.updateLastActivity(socket.user.id);
 
-        logDebug('message processed', {
-          messageId: message._id,
-          type: message.type,
-          room
-        });
+        if (process.env.NODE_ENV === 'development') {
+          logDebug('message processed', {
+            messageId: message._id,
+            type: message.type,
+            room
+          });
+        }
 
       } catch (error) {
         console.error('Message handling error:', error);
@@ -661,7 +684,9 @@ module.exports = function(io) {
         // 실제로 해당 방에 참여 중인지 먼저 확인
         const currentRoom = await socketState.getUserRoom(socket.user.id);
         if (!currentRoom || currentRoom !== roomId) {
-          console.log(`User ${socket.user.id} is not in room ${roomId}`);
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`User ${socket.user.id} is not in room ${roomId}`);
+          }
           return;
         }
 
@@ -672,7 +697,9 @@ module.exports = function(io) {
         }).select('participants').lean();
 
         if (!room) {
-          console.log(`Room ${roomId} not found or user has no access`);
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`Room ${roomId} not found or user has no access`);
+          }
           return;
         }
 
@@ -698,7 +725,9 @@ module.exports = function(io) {
         ).populate('participants', 'name email profileImage');
 
         if (!updatedRoom) {
-          console.log(`Room ${roomId} not found during update`);
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`Room ${roomId} not found during update`);
+          }
           return;
         }
 
@@ -714,7 +743,9 @@ module.exports = function(io) {
         io.to(roomId).emit('message', leaveMessage);
         io.to(roomId).emit('participantsUpdate', updatedRoom.participants);
 
-        console.log(`User ${socket.user.id} left room ${roomId} successfully`);
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`User ${socket.user.id} left room ${roomId} successfully`);
+        }
 
       } catch (error) {
         console.error('Leave room error:', error);
@@ -728,22 +759,30 @@ module.exports = function(io) {
     socket.on('disconnect', async (reason) => {
       if (!socket.user) return;
 
-      console.log(`[DEBUG] User ${socket.user.id} disconnected (${reason})`);
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[DEBUG] User ${socket.user.id} disconnected (${reason})`);
+      }
 
       try {
         // 해당 사용자의 현재 활성 연결인 경우에만 정리 (in-memory 사용)
         const currentSocketId = await socketState.getConnectedUser(socket.user.id);
-        console.log(`[DEBUG] Current socketId in map: ${currentSocketId}, disconnecting socketId: ${socket.id}`);
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`[DEBUG] Current socketId in map: ${currentSocketId}, disconnecting socketId: ${socket.id}`);
+        }
         
         if (currentSocketId === socket.id) {
           await socketState.removeConnectedUser(socket.user.id);
-          console.log(`[DEBUG] Removed user ${socket.user.id} from connectedUsers`);
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`[DEBUG] Removed user ${socket.user.id} from connectedUsers`);
+          }
         }
 
         const roomId = await socketState.getUserRoom(socket.user.id);
         if (roomId) {
           await socketState.removeUserRoom(socket.user.id);
-          console.log(`[DEBUG] Removed user ${socket.user.id} from userRooms (was in ${roomId})`);
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`[DEBUG] Removed user ${socket.user.id} from userRooms (was in ${roomId})`);
+          }
         }
 
         // 메시지 큐 정리 (TODO: Redis SCAN으로 사용자별 큐 정리 구현 필요)
@@ -781,12 +820,14 @@ module.exports = function(io) {
           }
         }
 
-        logDebug('user disconnected', {
-          reason,
-          userId: socket.user.id,
-          socketId: socket.id,
-          lastRoom: roomId
-        });
+        if (process.env.NODE_ENV === 'development') {
+          logDebug('user disconnected', {
+            reason,
+            userId: socket.user.id,
+            socketId: socket.id,
+            lastRoom: roomId
+          });
+        }
 
       } catch (error) {
         console.error('Disconnect handling error:', error);
@@ -931,12 +972,14 @@ module.exports = function(io) {
       reactions: {}
     });
     
-    logDebug('AI response started', {
-      messageId,
-      aiType: aiName,
-      room,
-      query
-    });
+    if (process.env.NODE_ENV === 'development') {
+      logDebug('AI response started', {
+        messageId,
+        aiType: aiName,
+        room,
+        query
+      });
+    }
 
     // 초기 상태 전송
     io.to(room).emit('aiMessageStart', {
@@ -949,10 +992,12 @@ module.exports = function(io) {
       // AI 응답 생성 및 스트리밍
       await aiService.generateResponse(query, aiName, {
         onStart: () => {
-          logDebug('AI generation started', {
-            messageId,
-            aiType: aiName
-          });
+          if (process.env.NODE_ENV === 'development') {
+            logDebug('AI generation started', {
+              messageId,
+              aiType: aiName
+            });
+          }
         },
         onChunk: async (chunk) => {
           accumulatedContent += chunk.currentChunk || '';
@@ -1006,12 +1051,14 @@ module.exports = function(io) {
             reactions: {}
           });
 
-          logDebug('AI response completed', {
-            messageId,
-            aiType: aiName,
-            contentLength: finalContent.content.length,
-            generationTime: Date.now() - timestamp
-          });
+          if (process.env.NODE_ENV === 'development') {
+            logDebug('AI response completed', {
+              messageId,
+              aiType: aiName,
+              contentLength: finalContent.content.length,
+              generationTime: Date.now() - timestamp
+            });
+          }
         },
         onError: async (error) => {
           await socketState.removeStreamingSession(messageId);
@@ -1023,11 +1070,13 @@ module.exports = function(io) {
             aiType: aiName
           });
 
-          logDebug('AI response error', {
-            messageId,
-            aiType: aiName,
-            error: error.message
-          });
+          if (process.env.NODE_ENV === 'development') {
+            logDebug('AI response error', {
+              messageId,
+              aiType: aiName,
+              error: error.message
+            });
+          }
         }
       });
     } catch (error) {
@@ -1040,11 +1089,13 @@ module.exports = function(io) {
         aiType: aiName
       });
 
-      logDebug('AI service error', {
-        messageId,
-        aiType: aiName,
-        error: error.message
-      });
+      if (process.env.NODE_ENV === 'development') {
+        logDebug('AI service error', {
+          messageId,
+          aiType: aiName,
+          error: error.message
+        });
+      }
     }
   }
 

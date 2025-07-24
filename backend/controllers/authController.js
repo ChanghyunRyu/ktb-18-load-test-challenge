@@ -6,8 +6,6 @@ const SessionService = require('../services/sessionService');
 const authController = {
   async register(req, res) {
     try {
-      console.log('Register request received:', req.body);
-      
       const { name, email, password } = req.body;
 
       // Input validation
@@ -49,7 +47,6 @@ const authController = {
       });
 
       await user.save();
-      console.log('User created:', user._id);
 
       // Create session with metadata
       const sessionInfo = await SessionService.createSession(user._id, {
@@ -142,8 +139,6 @@ const authController = {
         const existingSession = await SessionService.getActiveSession(user._id);
         
         if (existingSession) {
-          console.log('Existing session found for user:', user._id);
-          
           const io = req.app.get('io');
           if (io && existingSession.socketId) {
             // 기존 연결에 중복 로그인 알림
@@ -166,7 +161,6 @@ const authController = {
 
           // 기존 세션 제거
           await SessionService.removeSession(user._id, existingSession.sessionId);
-          console.log('Removed existing session for user:', user._id);
         }
       } catch (sessionError) {
         console.error('Session management error:', sessionError);
@@ -303,7 +297,6 @@ const authController = {
       const sessionId = req.header('x-session-id');
 
       if (!token || !sessionId) {
-        console.log('Missing token or sessionId:', { token: !!token, sessionId: !!sessionId });
         return res.status(401).json({
           success: false,
           message: '인증 정보가 제공되지 않았습니다.',
@@ -375,7 +368,6 @@ const authController = {
       try {
         validationResult = await SessionService.validateSession(user._id, sessionId);
         if (!validationResult.isValid) {
-          console.log('Session validation failed:', validationResult);
           return res.status(401).json({
             success: false,
             code: validationResult.error || 'INVALID_SESSION',
@@ -395,8 +387,6 @@ const authController = {
       SessionService.refreshSession(user._id, sessionId).catch(refreshError => {
         console.error('Session refresh error (non-blocking):', refreshError);
       });
-
-      console.log('Token verification successful for user:', user._id);
 
       // 응답 헤더 설정
       if (validationResult.needsProfileRefresh) {

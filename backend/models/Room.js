@@ -50,4 +50,17 @@ RoomSchema.methods.checkPassword = async function(password) {
   return await bcrypt.compare(password, room.password);
 };
 
+// 성능 최적화를 위한 인덱스 설정
+// 1. 가장 중요: 목록 조회 시 createdAt 정렬용
+RoomSchema.index({ createdAt: -1 });
+
+// 2. 검색 최적화: name 필드 정규표현식 검색용
+RoomSchema.index({ name: 1 });
+
+// 3. populate 최적화: creator 조회용
+RoomSchema.index({ creator: 1 });
+
+// 4. 권한 체크 최적화: participants 배열 검색용 (multikey index)
+RoomSchema.index({ participants: 1 });
+
 module.exports = mongoose.model('Room', RoomSchema);

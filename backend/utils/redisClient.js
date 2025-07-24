@@ -48,11 +48,15 @@ if (process.env.REDIS_CLUSTER_MODE === 'true') {
 
 // Redis 연결 이벤트 리스너
 redis.on('connect', () => {
-  console.log('Redis Client: Connection established');
+  if (process.env.NODE_ENV === 'development') {
+    console.log('Redis Client: Connection established');
+  }
 });
 
 redis.on('ready', () => {
-  console.log('Redis Client: Ready to receive commands');
+  if (process.env.NODE_ENV === 'development') {
+    console.log('Redis Client: Ready to accept commands');
+  }
 });
 
 redis.on('error', (error) => {
@@ -60,17 +64,23 @@ redis.on('error', (error) => {
 });
 
 redis.on('end', () => {
-  console.log('Redis Client: Connection ended');
+  if (process.env.NODE_ENV === 'development') {
+    console.log('Redis Client: Connection ended');
+  }
 });
 
 redis.on('reconnecting', () => {
-  console.log('Redis Client: Attempting to reconnect...');
+  if (process.env.NODE_ENV === 'development') {
+    console.log('Redis Client: Attempting to reconnect...');
+  }
 });
 
 // 동기적 Redis 연결 함수 (서버 시작 전 필수 실행)
 const connectRedis = async () => {
   try {
-    console.log('🔄 Connecting to Redis...');
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔄 Connecting to Redis...');
+    }
     await redis.connect();
     
     // 연결 테스트 - ping() 대신 set/get 사용
