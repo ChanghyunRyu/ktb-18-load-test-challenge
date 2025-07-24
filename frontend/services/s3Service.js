@@ -166,6 +166,7 @@ class S3Service {
           Key: s3Key,
           Body: file,
           ContentType: file.type,
+          ACL: 'public-read', // 퍼블릭 읽기 권한 부여
         },
       });
 
