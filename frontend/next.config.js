@@ -11,6 +11,32 @@ const nextConfig = {
     buildActivity: true,
     buildActivityPosition: 'bottom-right'
   },
+  // AWS SDK 브라우저 호환성을 위한 webpack 설정
+  webpack: (config, { buildId, dev, isServer, defaultLoaders, webpack }) => {
+    // AWS SDK 브라우저 호환성 개선
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        net: false,
+        tls: false,
+        crypto: false,
+        stream: false,
+        url: false,
+        zlib: false,
+        http: false,
+        https: false,
+        assert: false,
+        os: false,
+        path: false,
+      };
+    }
+
+    // AWS SDK 모듈들을 외부로 처리하지 않도록 설정
+    config.externals = config.externals || [];
+    
+    return config;
+  },
   // 개발 환경에서만 더 자세한 에러 로깅
   ...(process.env.NODE_ENV === 'development' && {
     experimental: {

@@ -1,4 +1,5 @@
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
 import crypto from 'crypto-js';
 import authService from './authService';
 import { Toast } from '../components/Toast';
@@ -153,26 +154,30 @@ class S3Service {
       const safeFilename = this.generateSafeFilename(file.name);
       const s3Key = this.generateS3Key(safeFilename, user.id);
 
-      const uploadParams = {
-        Bucket: this.bucketName,
-        Key: s3Key,
-        Body: file,
-        ContentType: file.type,
-        // ACL: 'public-read', // 필요에 따라 설정
-      };
-
-      // 프로그래스 추적을 위한 커스텀 업로드 (간단한 버전)
-      const command = new PutObjectCommand(uploadParams);
-      
       if (onProgress) {
         onProgress(0);
       }
 
-      const result = await s3Client.send(command);
+      // Upload 클래스를 사용하여 안정적인 업로드와 진행률 추적
+      const upload = new Upload({
+        client: s3Client,
+        params: {
+          Bucket: this.bucketName,
+          Key: s3Key,
+          Body: file,
+          ContentType: file.type,
+        },
+      });
 
-      if (onProgress) {
-        onProgress(100);
-      }
+      // 진행률 추적
+      upload.on('httpUploadProgress', (progress) => {
+        if (onProgress && progress.total) {
+          const percentCompleted = Math.round((progress.loaded * 100) / progress.total);
+          onProgress(percentCompleted);
+        }
+      });
+
+      const result = await upload.done();
 
       const s3Url = `https://${this.bucketName}.s3.${this.region}.amazonaws.com/${s3Key}`;
 
@@ -336,6 +341,13 @@ class S3Service {
       return {
         success: false,
         message: 'AWS 시크릿 키가 올바르지 않습니다.'
+      };
+    }
+
+    if (error.message && error.message.includes('getReader')) {
+      return {
+        success: false,
+        message: '파일 읽기 중 오류가 발생했습니다. 브라우저를 새로고침하고 다시 시도해주세요.'
       };
     }
 
