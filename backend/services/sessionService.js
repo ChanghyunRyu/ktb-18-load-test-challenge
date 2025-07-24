@@ -362,6 +362,22 @@ class SessionService {
       return null;
     }
   }
+
+  // refreshSession 메서드 추가
+  static async refreshSession(userId, sessionId) {
+    try {
+      if (!userId || !sessionId) {
+        console.error('refreshSession: userId and sessionId are required');
+        return false;
+      }
+
+      // 세션 활동 시간만 업데이트
+      return await this.updateLastActivity(userId);
+    } catch (error) {
+      console.error('Session refresh error:', error);
+      return false;
+    }
+  }
 }
 
 module.exports = SessionService;
