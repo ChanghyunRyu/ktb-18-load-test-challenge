@@ -13,25 +13,36 @@ if (process.env.REDIS_CLUSTER_MODE === 'true') {
     }
   } catch (e) {
     console.error('Invalid REDIS_CLUSTER_NODES:', e);
-    clusterNodes = [];
+    throw new Error('REDIS_CLUSTER_NODES configuration error');
   }
 
-  // Redis v4 클러스터 문법
+  // 정확한 Redis v4 클러스터 문법
   const rootNodes = clusterNodes.map(node => ({
     url: `redis://${node.host}:${node.port}`
   }));
 
   redis = createCluster({
-    rootNodes,
-    defaults: {
-      password: process.env.REDIS_PASSWORD || undefined
-    }
+    rootNodes: rootNodes
   });
+
 } else {
-  // 단일 Redis 모드
-  redis = createClient({
-    url: `redis://${process.env.REDIS_HOST || '127.0.0.1'}:${process.env.REDIS_PORT || 6379}`,
-    password: process.env.REDIS_PASSWORD || undefined
+  // 단일 Redis 모드 
+  const host = process.env.REDIS_HOST || '127.0.0.1';
+  const port = process.env.REDIS_PORT || 6379;
+  const password = process.env.REDIS_PASSWORD;
+  
+  let url = `redis://${host}:${port}`;
+  if (password) {
+    url = `redis://:${password}@${host}:${port}`;
+  }
+  
+  redis = createClient({ 
+    url,
+    socket: {
+      family: 4, // IPv4 강제 사용
+      connectTimeout: 10000,
+      reconnectStrategy: (retries) => Math.min(retries * 50, 2000)
+    }
   });
 }
 
@@ -52,23 +63,52 @@ redis.on('end', () => {
   console.log('Redis Client: Connection ended');
 });
 
-// Redis 연결
-redis.connect().catch(err => {
-  console.error('Redis initial connection failed:', err.message);
+redis.on('reconnecting', () => {
+  console.log('Redis Client: Attempting to reconnect...');
 });
 
-// Redis 연결 상태 확인 함수
+// 동기적 Redis 연결 함수 (서버 시작 전 필수 실행)
+const connectRedis = async () => {
+  try {
+    console.log('🔄 Connecting to Redis...');
+    await redis.connect();
+    
+    // 연결 테스트 - ping() 대신 set/get 사용
+    const testKey = `test_connection_${Date.now()}`;
+    await redis.set(testKey, 'test_value');
+    const testValue = await redis.get(testKey);
+    await redis.del(testKey); // 테스트 키 삭제
+    
+    if (testValue === 'test_value') {
+      console.log('✅ Redis: Connection successful and tested');
+      return true;
+    } else {
+      throw new Error('Redis set/get test failed');
+    }
+  } catch (error) {
+    console.error('❌ Redis: Connection FAILED:', error.message);
+    throw new Error(`Redis connection failed: ${error.message}`);
+  }
+};
+
+// Redis 연결 상태 확인 함수 (단순화)
 const checkRedisConnection = async () => {
   try {
-    await redis.ping();
-    console.log('Redis Client: Connection test successful');
-    return true;
+    if (!redis.isReady) {
+      return false;
+    }
+    // ping() 대신 간단한 set/get 테스트
+    const testKey = `health_check_${Date.now()}`;
+    await redis.set(testKey, 'ok');
+    const result = await redis.get(testKey);
+    await redis.del(testKey);
+    return result === 'ok';
   } catch (error) {
-    console.error('Redis Client: Connection test failed:', error.message);
     return false;
   }
 };
 
-// Redis 클라이언트와 연결 체크 함수 내보내기
+// Redis 클라이언트와 연결 함수들 내보내기
 module.exports = redis;
+module.exports.connectRedis = connectRedis;
 module.exports.checkRedisConnection = checkRedisConnection;

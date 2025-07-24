@@ -9,6 +9,7 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
+    "@socket.io/redis-adapter": "^8.2.1",
     "axios": "^1.4.0",
     "bcryptjs": "^2.4.3",
     "compression": "^1.7.5",
