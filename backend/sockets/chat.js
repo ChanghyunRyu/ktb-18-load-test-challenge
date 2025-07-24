@@ -149,7 +149,10 @@ module.exports = function(io) {
       // 메시지 로드
       const messages = await Message.find(query)
         .populate('sender', 'name email profileImage')
-        .populate('file', 'filename originalname mimetype size s3Url s3Key storageType')
+        .populate({
+          path: 'file',
+          select: 'filename originalname mimetype size s3Url s3Key storageType uploadDate'
+        })
         .sort({ timestamp: -1 })
         .limit(limit + 1)
         .lean();
@@ -642,7 +645,7 @@ module.exports = function(io) {
         await message.save();
         await message.populate([
           { path: 'sender', select: 'name email profileImage' },
-          { path: 'file', select: 'filename originalname mimetype size s3Url s3Key storageType' }
+          { path: 'file', select: 'filename originalname mimetype size s3Url s3Key storageType uploadDate' }
         ]);
 
         io.to(room).emit('message', message);
