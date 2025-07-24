@@ -249,7 +249,8 @@ axiosInstance.interceptors.response.use(
       } catch (refreshError) {
         console.error('Token refresh failed:', refreshError);
         authService.logout();
-        if (typeof window !== 'undefined') {
+        // 무한 루프 방지: 이미 로그인 페이지에 있다면 리다이렉트하지 않음
+        if (typeof window !== 'undefined' && window.location.pathname !== '/') {
           window.location.href = '/?error=session_expired';
         }
       }

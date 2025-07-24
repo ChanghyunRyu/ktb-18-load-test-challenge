@@ -383,7 +383,10 @@ export const useChatRoom = () => {
       if (!mountedRef.current) return;
       cleanup();
       authService.logout();
-      router.replace('/?error=session_expired');
+      // 이미 로그인 페이지에 있으면 리다이렉트하지 않음
+      if (router.pathname !== '/') {
+        router.replace('/?error=session_expired');
+      }
     });
 
     socketRef.current.on('error', (error) => {
@@ -505,7 +508,10 @@ export const useChatRoom = () => {
       
       const user = authService.getCurrentUser();
       if (!user) {
-        router.replace('/?redirect=' + router.asPath);
+        // 이미 로그인 페이지에 있으면 리다이렉트하지 않음
+        if (router.pathname !== '/') {
+          router.replace('/?redirect=' + router.asPath);
+        }
         return;
       }
 
@@ -541,7 +547,10 @@ export const useChatRoom = () => {
       const user = authService.getCurrentUser();
       if (!user) {
         clearInterval(tokenCheckInterval);
-        router.replace('/?redirect=' + router.asPath);
+        // 이미 로그인 페이지에 있으면 리다이렉트하지 않음
+        if (router.pathname !== '/') {
+          router.replace('/?redirect=' + router.asPath);
+        }
       }
     }, 60000);
 

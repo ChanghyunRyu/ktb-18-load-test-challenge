@@ -165,12 +165,18 @@ class AuthService {
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
-      console.log("??????");
+      console.log("Logging out user");
       socketService.disconnect();
       localStorage.removeItem('user');
+      localStorage.removeItem('lastTokenVerification');
+      
       // 인증 상태 변경 이벤트 발생
       window.dispatchEvent(new Event('authStateChange'));
-      window.location.href = '/';
+      
+      // 부드러운 리다이렉트 (현재 페이지가 로그인 페이지가 아닌 경우만)
+      if (typeof window !== 'undefined' && window.location.pathname !== '/') {
+        window.location.href = '/?session_ended=true';
+      }
     }
   }
 
@@ -317,7 +323,9 @@ class AuthService {
       const SESSION_TIMEOUT = 2 * 60 * 60 * 1000;
       
       if (Date.now() - user.lastActivity > SESSION_TIMEOUT) {
-        this.logout();
+        console.log('Session timeout detected');
+        localStorage.removeItem('user');
+        localStorage.removeItem('lastTokenVerification');
         return null;
       }
 
@@ -326,7 +334,8 @@ class AuthService {
       return user;
     } catch (error) {
       console.error('Get current user error:', error);
-      this.logout();
+      localStorage.removeItem('user');
+      localStorage.removeItem('lastTokenVerification');
       return null;
     }
   }

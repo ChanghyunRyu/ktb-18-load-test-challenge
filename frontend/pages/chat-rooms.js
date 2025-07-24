@@ -210,12 +210,16 @@ function ChatRoomsComponent() {
         }
       }
       authService.logout();
-      router.replace('/?error=session_expired');
+      if (router.pathname !== '/') {
+        router.replace('/?error=session_expired');
+      }
       return false;
     } catch (error) {
       console.error('Auth error handling failed:', error);
       authService.logout();
-      router.replace('/?error=auth_error');
+      if (router.pathname !== '/') {
+        router.replace('/?error=auth_error');
+      }
       return false;
     }
   }, [router]);
@@ -606,7 +610,10 @@ function ChatRoomsComponent() {
       } else if (error.status === 401) {
         // 인증 만료/세션 만료 시 로그아웃 처리
         await authService.logout();
-        router.replace('/?error=session_expired');
+        // 이미 로그인 페이지에 있으면 리다이렉트하지 않음
+        if (router.pathname !== '/') {
+          router.replace('/?error=session_expired');
+        }
         return;
       }
       setError({

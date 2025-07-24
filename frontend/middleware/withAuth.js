@@ -12,7 +12,12 @@ export const withAuth = (WrappedComponent) => {
       const checkAuth = () => {
         const user = authService.getCurrentUser();
         if (!user) {
-          router.replace('/?redirect=' + router.asPath);
+          // 이미 로그인 페이지에 있으면 리다이렉트하지 않음
+          if (router.pathname !== '/') {
+            router.replace('/?redirect=' + router.asPath);
+          } else {
+            setIsLoading(false);
+          }
         } else {
           setIsLoading(false);
         }
@@ -49,8 +54,15 @@ export const withoutAuth = (WrappedComponent) => {
         
         const user = authService.getCurrentUser();
         if (user && router.pathname === '/') {
-          // 이미 로그인된 사용자가 로그인 페이지 접근 시
-          await router.replace('/chat-rooms');
+          // 세션 검증 후 리다이렉트 (무한 루프 방지)
+          try {
+            await authService.verifyToken();
+            await router.replace('/chat-rooms');
+          } catch (error) {
+            console.log('Session invalid, staying on login page');
+            authService.logout();
+            setIsLoading(false);
+          }
         } else {
           setIsLoading(false);
         }

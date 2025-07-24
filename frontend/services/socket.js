@@ -50,14 +50,18 @@ class SocketService {
         } catch (error) {
           console.error('Force login error:', error);
           await authService.logout();
-          window.location.href = '/';
+          if (window.location.pathname !== '/') {
+            window.location.href = '/';
+          }
         }
       }, 10000);
 
     } catch (error) {
       console.error('[Socket] Error handling duplicate login:', error);
       await authService.logout();
-      window.location.href = '/?error=session_error';
+      if (window.location.pathname !== '/') {
+        window.location.href = '/?error=session_error';
+      }
     }
   }
 
@@ -245,7 +249,13 @@ class SocketService {
     if (error.message.includes('auth')) {
       authService.refreshToken()
         .then(() => this.reconnect())
-        .catch(() => authService.logout());
+        .catch(() => {
+          authService.logout();
+          // 이미 로그인 페이지에 있으면 리다이렉트하지 않음
+          if (window.location.pathname !== '/') {
+            window.location.href = '/?error=auth_failed';
+          }
+        });
       return;
     }
 
