@@ -137,16 +137,50 @@ const FileMessage = ({
         throw new Error('파일 정보가 없습니다.');
       }
 
-      // S3 파일인 경우 직접 S3 URL 사용
+      // S3 파일인 경우 fetch로 다운로드
       if ((msg.file.storageType === 's3' || msg.file.s3Url) && msg.file.s3Url) {
-        console.log('Direct S3 download:', msg.file.s3Url);
-        const link = document.createElement('a');
-        link.href = msg.file.s3Url;
-        link.download = getDecodedFilename(msg.file.originalname);
-        link.target = '_blank';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        console.log('Fetching S3 file for download:', msg.file.s3Url);
+        
+        try {
+          // S3에서 파일을 fetch로 받아오기
+          const response = await fetch(msg.file.s3Url);
+          if (!response.ok) {
+            throw new Error(`파일 다운로드 실패: ${response.status}`);
+          }
+          
+          const blob = await response.blob();
+          const filename = getDecodedFilename(msg.file.originalname);
+          
+          // blob을 사용해서 다운로드
+          const blobUrl = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = blobUrl;
+          link.download = filename;
+          link.style.display = 'none';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          
+          // 메모리 정리
+          setTimeout(() => {
+            window.URL.revokeObjectURL(blobUrl);
+          }, 100);
+          
+        } catch (fetchError) {
+          console.error('Fetch download failed, trying direct link:', fetchError);
+          
+          // fetch 실패시 직접 링크 방식으로 폴백
+          const downloadUrl = new URL(msg.file.s3Url);
+          downloadUrl.searchParams.append('response-content-disposition', `attachment; filename="${encodeURIComponent(msg.file.originalname)}"`);
+          
+          const link = document.createElement('a');
+          link.href = downloadUrl.toString();
+          link.download = getDecodedFilename(msg.file.originalname);
+          link.style.display = 'none';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
         return;
       }
 
@@ -162,6 +196,7 @@ const FileMessage = ({
       const link = document.createElement('a');
       link.href = authenticatedUrl;
       link.download = getDecodedFilename(msg.file.originalname);
+      link.style.display = 'none';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);

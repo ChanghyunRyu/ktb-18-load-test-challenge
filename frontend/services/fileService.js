@@ -218,20 +218,54 @@ class FileService {
 
   async downloadFile(filename, originalname, fileObj = null) {
     try {
-      // S3 파일인 경우 직접 다운로드
+      // S3 파일인 경우 fetch로 다운로드
       if (fileObj && ((fileObj.storageType === 's3' || fileObj.s3Url) && fileObj.s3Url)) {
-        console.log('Direct S3 download via downloadFile:', fileObj.s3Url);
+        console.log('Fetching S3 file for download via downloadFile:', fileObj.s3Url);
         
-        // S3에서 직접 다운로드
-        const link = document.createElement('a');
-        link.href = fileObj.s3Url;
-        link.download = originalname || filename;
-        link.target = '_blank';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        
-        return { success: true };
+        try {
+          // S3에서 파일을 fetch로 받아오기
+          const response = await fetch(fileObj.s3Url);
+          if (!response.ok) {
+            throw new Error(`파일 다운로드 실패: ${response.status}`);
+          }
+          
+          const blob = await response.blob();
+          const downloadFilename = originalname || filename;
+          
+          // blob을 사용해서 다운로드
+          const blobUrl = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = blobUrl;
+          link.download = downloadFilename;
+          link.style.display = 'none';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          
+          // 메모리 정리
+          setTimeout(() => {
+            window.URL.revokeObjectURL(blobUrl);
+          }, 100);
+          
+          return { success: true };
+          
+        } catch (fetchError) {
+          console.error('Fetch download failed, trying direct link:', fetchError);
+          
+          // fetch 실패시 직접 링크 방식으로 폴백
+          const downloadUrl = new URL(fileObj.s3Url);
+          downloadUrl.searchParams.append('response-content-disposition', `attachment; filename="${encodeURIComponent(originalname || filename)}"`);
+          
+          const link = document.createElement('a');
+          link.href = downloadUrl.toString();
+          link.download = originalname || filename;
+          link.style.display = 'none';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          
+          return { success: true };
+        }
       }
 
       // 로컬 파일인 경우 기존 로직 사용
