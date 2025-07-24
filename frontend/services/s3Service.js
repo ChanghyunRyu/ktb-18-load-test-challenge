@@ -275,13 +275,28 @@ class S3Service {
         onProgress(100);
       }
 
-      return {
+      // 로컬 업로드와 동일한 응답 구조로 맞춤
+      const finalResult = {
         success: true,
+        message: '파일 업로드 성공',
         data: {
-          ...metadataResult.data,
-          url: uploadResult.data.s3Url
+          file: {
+            _id: metadataResult.data._id,
+            filename: metadataResult.data.filename,
+            originalname: metadataResult.data.originalname,
+            mimetype: metadataResult.data.mimetype,
+            size: metadataResult.data.size,
+            s3Url: metadataResult.data.s3Url,
+            s3Key: metadataResult.data.s3Key,
+            storageType: metadataResult.data.storageType,
+            uploadDate: metadataResult.data.uploadDate,
+            url: uploadResult.data.s3Url
+          }
         }
       };
+
+      console.log('S3 upload complete result:', finalResult);
+      return finalResult;
 
     } catch (error) {
       console.error('Upload error:', error);

@@ -117,6 +117,7 @@ exports.saveFileMetadata = async (req, res) => {
         mimetype: file.mimetype,
         size: file.size,
         s3Url: file.s3Url,
+        s3Key: file.s3Key,
         storageType: file.storageType,
         uploadDate: file.uploadDate
       }
