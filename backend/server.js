@@ -7,7 +7,9 @@ const socketIO = require('socket.io');
 const path = require('path');
 const { router: roomsRouter, initializeSocket } = require('./routes/api/rooms');
 const routes = require('./routes');
-const { checkRedisConnection } = require('./utils/redisClient');
+const { connectRedis, checkRedisConnection } = require('./utils/redisClient');
+const { createAdapter } = require('@socket.io/redis-adapter');
+const { createClient, createCluster } = require('redis');
 
 const app = express();
 const server = http.createServer(app);
@@ -103,21 +105,105 @@ app.use((err, req, res, next) => {
   });
 });
 
+const setupSocketIORedisAdapter = async () => {
+  try {
+    console.log('🔄 Setting up Socket.IO Redis Adapter...');
+    
+    if (process.env.REDIS_CLUSTER_MODE === 'true') {
+      console.log('Setting up Socket.IO Redis Cluster Adapter...');
+      
+      // 클러스터 노드 파싱
+      let clusterNodes;
+      try {
+        clusterNodes = JSON.parse(process.env.REDIS_CLUSTER_NODES);
+        if (!Array.isArray(clusterNodes) || clusterNodes.length === 0) {
+          throw new Error('REDIS_CLUSTER_NODES is empty or invalid');
+        }
+      } catch (e) {
+        console.error('Invalid REDIS_CLUSTER_NODES for Socket.IO:', e);
+        return false;
+      }
+
+      // Socket.IO용 Redis 클러스터 클라이언트 생성 (기존과 동일한 설정)
+      const rootNodes = clusterNodes.map(node => ({
+        url: `redis://${node.host}:${node.port}`
+      }));
+
+      const pubClient = createCluster({
+        rootNodes: rootNodes
+      });
+
+      const subClient = pubClient.duplicate();
+
+      // 연결
+      await pubClient.connect();
+      await subClient.connect();
+
+      // Socket.IO Redis Adapter 설정
+      io.adapter(createAdapter(pubClient, subClient));
+      
+      console.log('✅ Socket.IO Redis Cluster Adapter: Connected successfully');
+      return true;
+      
+    } else {
+      console.log('Setting up Socket.IO Single Redis Adapter...');
+      
+      // 단일 Redis 모드
+      const host = process.env.REDIS_HOST || '127.0.0.1';
+      const port = process.env.REDIS_PORT || 6379;
+      const password = process.env.REDIS_PASSWORD;
+      
+      let url = `redis://${host}:${port}`;
+      if (password) {
+        url = `redis://:${password}@${host}:${port}`;
+      }
+      
+      const pubClient = createClient({ 
+        url,
+        socket: {
+          family: 4,
+          connectTimeout: 10000,
+          reconnectStrategy: (retries) => Math.min(retries * 50, 2000)
+        }
+      });
+      
+      const subClient = pubClient.duplicate();
+      
+      // 연결
+      await pubClient.connect();
+      await subClient.connect();
+      
+      // Socket.IO Redis Adapter 설정
+      io.adapter(createAdapter(pubClient, subClient));
+      
+      console.log('✅ Socket.IO Single Redis Adapter: Connected successfully');
+      return true;
+    }
+  } catch (error) {
+    console.error('❌ Failed to setup Socket.IO Redis Adapter:', error.message);
+    console.log('🔄 Using default in-memory adapter (limited to single server)');
+    return false;
+  }
+};
+
 // 서버 시작 - MongoDB와 Redis 연결 확인
 const startServer = async () => {
   try {
+    console.log('🚀 SERVER VERSION: v2.2.1 - Socket.IO Redis Adapter Enabled');
+    console.log('📅 Build Time:', new Date().toISOString());
+    
     // MongoDB 연결
     await mongoose.connect(process.env.MONGO_URI);
     console.log('MongoDB Connected');
 
-    // Redis 연결 확인
-    const isRedisConnected = await checkRedisConnection();
-    if (!isRedisConnected) {
-      console.error('⚠️  Redis connection failed - Server will start but session management may not work properly');
-    }
+    // Redis 연결 (필수) - 실패 시 서버 시작 중단
+    await connectRedis();
 
-    // Socket.IO는 기본 in-memory adapter 사용
-    console.log('🚀 Socket.IO using default in-memory adapter');
+    // Socket.IO Redis Adapter 설정
+    const socketIOAdapterSuccess = await setupSocketIORedisAdapter();
+    if (!socketIOAdapterSuccess) {
+      console.log('🚀 Socket.IO using default in-memory adapter');
+    }
 
     // 서버 시작
     server.listen(PORT, '0.0.0.0', () => {
@@ -128,12 +214,21 @@ const startServer = async () => {
       // 연결 상태 요약
       console.log('\n=== Connection Status ===');
       console.log('MongoDB: ✅ Connected');
-      console.log(`Redis (Sessions): ${isRedisConnected ? '✅ Connected' : '❌ Disconnected'}`);
-      console.log('Socket.IO: ✅ In-Memory Adapter');
+      console.log('Redis (Sessions): ✅ Connected');
+      console.log(`Socket.IO: ${socketIOAdapterSuccess ? '✅ Redis Adapter (Cluster)' : '✅ In-Memory Adapter'}`);
       console.log('=========================\n');
     });
   } catch (err) {
-    console.error('Server startup error:', err);
+    console.error('❌ Server startup error:', err.message);
+    
+    // Redis 연결 실패 시 구체적인 안내
+    if (err.message.includes('Redis connection failed')) {
+      console.error('\n💡 Redis 연결이 필요합니다:');
+      console.error('1. Redis 서버가 실행 중인지 확인');
+      console.error('2. 환경변수 REDIS_CLUSTER_NODES 확인');
+      console.error('3. 네트워크 연결 상태 확인\n');
+    }
+    
     process.exit(1);
   }
 };
