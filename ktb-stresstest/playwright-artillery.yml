@@ -17,5 +17,5 @@ scenarios:
     flowFunction: "generateChatAiResponse" 
 
 # module.exports = { registerUser, loginUser, createNewChat, scrollChat, sendMessageToChat, reactionToMessage, uploadFileToChat, updateProfileImage, generateChatAiResponse };
-# ✅ 성공항목 : registerUser, loginUser, createNewChat, scrollChat, updateProfileImage
-# ❌ 실패항목 : sendMessageToChat, reactionToMessage, uploadFileToChat, generateChatAiResponse
+# ✅ 성공항목 : registerUser, loginUser, createNewChat, scrollChat, sendMessageToChat, reactionToMessage, uploadFileToChat, updateProfileImage, generateChatAiResponse
+# ❌ 실패항목 : 

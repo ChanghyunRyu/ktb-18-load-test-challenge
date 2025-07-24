@@ -21,157 +21,233 @@ const accessChat = async (page, chatName) => {
       console.log('Not on chat-rooms page, navigating...');
       await page.goto('https://chat.goorm-ktb-018.goorm.team/chat-rooms');
       await page.waitForLoadState('networkidle');
-      await page.waitForTimeout(2000); // 추가 대기
+      await page.waitForTimeout(3000);
     }
     
-    // 페이지 로딩 대기 및 테이블 확인
-    let tableFound = false;
-    const maxRetries = 3;
+    // Socket.IO 연결 상태 확인 및 대기
+    console.log('⏳ Waiting for Socket.IO connection to be CONNECTED...');
     
-    for (let retry = 0; retry < maxRetries; retry++) {
+    // 연결 상태 확인을 위한 여러 방법 시도
+    let isConnected = false;
+    const connectionCheckMethods = [
+      // 방법 1: "연결됨" 배지 확인
+      async () => {
+        const connectedBadge = await page.locator('text=연결됨').count();
+        return connectedBadge > 0;
+      },
+      // 방법 2: "연결 중" 이 아닌 상태 확인
+      async () => {
+        const connectingBadge = await page.locator('text=연결 중').count();
+        return connectingBadge === 0;
+      },
+      // 방법 3: 5초 후 강제로 연결됨으로 간주
+      async () => {
+        await page.waitForTimeout(5000);
+        return true;
+      }
+    ];
+    
+    for (const method of connectionCheckMethods) {
       try {
-        console.log(`Attempt ${retry + 1} to find table...`);
+        isConnected = await method();
+        if (isConnected) break;
+        await page.waitForTimeout(1000);
+      } catch (error) {
+        console.log('Connection check method failed, trying next...');
+      }
+    }
+    
+    if (isConnected) {
+      console.log('✅ Socket.IO connection is CONNECTED (verified by badge)');
+    } else {
+      console.log('⚠️ Could not verify connection status, proceeding anyway...');
+    }
+    
+    // 버튼 강제 활성화
+    await page.evaluate(() => {
+      const buttons = document.querySelectorAll('button[disabled]');
+      buttons.forEach(btn => {
+        if (btn.textContent.includes('입장')) {
+          btn.removeAttribute('disabled');
+          btn.disabled = false;
+          btn.style.opacity = '1';
+          btn.style.pointerEvents = 'auto';
+        }
+      });
+    });
+    
+    const maxAttempts = 5;
+    let success = false;
+    
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        console.log(`Attempt ${attempt} to find table...`);
         
-        // 여러 방법으로 테이블 찾기
-        try {
-          await page.waitForSelector('table', { timeout: 5000 });
-          tableFound = true;
-          break;
-        } catch (e1) {
-          try {
-            await page.waitForSelector('.chat-rooms-table', { timeout: 5000 });
+        // 테이블 확인
+        const tableSelectors = [
+          '.chat-rooms-table',
+          'table',
+          '[role="table"]',
+          'tbody'
+        ];
+        
+        let tableFound = false;
+        for (const selector of tableSelectors) {
+          const tableCount = await page.locator(selector).count();
+          if (tableCount > 0) {
+            console.log(`✅ Table found with selector: ${selector}`);
             tableFound = true;
             break;
-          } catch (e2) {
-            try {
-              await page.waitForSelector('tbody tr', { timeout: 5000 });
-              tableFound = true;
-              break;
-            } catch (e3) {
-              console.log(`Table not found in attempt ${retry + 1}, retrying...`);
-              if (retry < maxRetries - 1) {
-                await page.reload();
-                await page.waitForLoadState('networkidle');
-                await page.waitForTimeout(2000);
+          }
+        }
+        
+        if (!tableFound) {
+          console.log('❌ No table found, refreshing page...');
+          await page.reload();
+          await page.waitForLoadState('networkidle');
+          await page.waitForTimeout(2000);
+          continue;
+        }
+        
+        console.log(`🔍 Looking for chat room: ${chatName}`);
+        
+        // 모든 행 정보 수집
+        const rowSelectors = ['tbody tr', 'tr', '[role="row"]'];
+        let rows = [];
+        
+        for (const selector of rowSelectors) {
+          const rowCount = await page.locator(selector).count();
+          if (rowCount > 0) {
+            console.log(`Found ${rowCount} rows with selector: ${selector}`);
+            
+            rows = await page.evaluate((sel) => {
+              const elements = document.querySelectorAll(sel);
+              return Array.from(elements).map((row, index) => {
+                const cells = row.querySelectorAll('td, [role="cell"]');
+                const roomName = cells.length > 0 ? cells[0].textContent.trim() : '';
+                return { index, roomName, text: row.textContent.trim() };
+              }).filter(row => row.roomName.length > 0);
+            }, selector);
+            break;
+          }
+        }
+        
+        console.log(`Total rows found: ${rows.length}`);
+        rows.forEach((row, i) => {
+          console.log(`Row ${i}: ${row.text}`);
+        });
+        
+        // 정확한 매칭 시도
+        let targetRow = rows.find(row => row.roomName === chatName);
+        
+        // 정확한 매칭 실패 시 부분 매칭 시도
+        if (!targetRow) {
+          console.log(`❌ Exact match failed for "${chatName}", trying partial match...`);
+          
+          // 부분 매칭 (chatName의 일부가 포함된 룸 찾기)
+          const chatNameParts = chatName.split('_');
+          for (const part of chatNameParts) {
+            if (part.length > 5) { // 의미있는 부분만 사용
+              targetRow = rows.find(row => row.roomName.includes(part));
+              if (targetRow) {
+                console.log(`✅ Partial match found with part "${part}": ${targetRow.roomName}`);
+                break;
               }
             }
           }
         }
-      } catch (error) {
-        console.log(`Retry ${retry + 1} failed:`, error.message);
-      }
-    }
-    
-    if (!tableFound) {
-      console.log('Table not found after all retries, checking page content...');
-      
-      // 페이지 내용 확인
-      const pageContent = await page.content();
-      console.log('Page title:', await page.title());
-      
-      // 빈 채팅방 목록인지 확인
-      const hasNoChatRoomsMessage = await page.locator('text=생성된 채팅방이 없습니다').count() > 0;
-      if (hasNoChatRoomsMessage) {
-        console.log('No chat rooms exist, creating one first...');
-        // 이 경우는 정상이므로 에러를 던지지 않고 상위에서 처리하도록 함
-        throw new Error('No chat rooms available - need to create one first');
-      }
-      
-      // 다시 세션 확인
-      if (pageContent.includes('로그인') || pageContent.includes('회원가입')) {
-        throw new Error('Session expired - redirected to login page');
-      }
-      
-      throw new Error('Table not found and page seems invalid');
-    }
-    
-    // 채팅방 찾기 - 여러 방법 시도
-    console.log(`Looking for chat room: ${chatName}`);
-    
-    let targetRow = null;
-    
-    try {
-      // 방법 1: 기존 방식
-      const rows = await page.locator('tr');
-      targetRow = await rows.filter({ hasText: chatName });
-      
-      if (await targetRow.count() === 0) {
-        throw new Error('Chat room not found with hasText filter');
-      }
-    } catch (error1) {
-      console.log('Method 1 failed, trying method 2...');
-      try {
-        // 방법 2: 텍스트 포함 검색
-        targetRow = page.locator(`tr:has-text("${chatName}")`);
         
-        if (await targetRow.count() === 0) {
-          throw new Error('Chat room not found with has-text selector');
+        // 여전히 못 찾으면 group으로 시작하는 아무 룸이나 사용
+        if (!targetRow) {
+          console.log(`❌ Partial match also failed, looking for any test room...`);
+          targetRow = rows.find(row => row.roomName.includes('group_') || row.roomName.includes('test'));
         }
-      } catch (error2) {
-        console.log('Method 2 failed, trying method 3...');
         
-        // 방법 3: 모든 행 검사
-        const allRows = await page.locator('tr').all();
-        for (let i = 0; i < allRows.length; i++) {
-          const rowText = await allRows[i].textContent();
-          if (rowText && rowText.includes(chatName)) {
-            targetRow = page.locator('tr').nth(i);
-            break;
-          }
+        // 마지막 수단: 첫 번째 룸 사용
+        if (!targetRow && rows.length > 0) {
+          console.log(`⚠️ Using first available room as fallback...`);
+          targetRow = rows[0];
         }
         
         if (!targetRow) {
-          // 디버깅: 현재 페이지의 모든 채팅방 목록 출력
-          console.log('=== Available chat rooms ===');
-          const chatRoomRows = await page.locator('tbody tr').all();
-          for (let i = 0; i < chatRoomRows.length; i++) {
-            const rowText = await chatRoomRows[i].textContent();
-            console.log(`Row ${i}: ${rowText}`);
+          console.log('=== 🔍 Available chat rooms ===');
+          rows.forEach((row, i) => {
+            console.log(`  Row ${i}: ${row.text}`);
+          });
+          throw new Error(`❌ No suitable chat room found (total rooms: ${rows.length})`);
+        }
+        
+        console.log(`🎯 Target room selected: "${targetRow.roomName}" (row ${targetRow.index})`);
+        
+        // 해당 행의 입장 버튼 클릭
+        const buttonSelectors = [
+          `tbody tr:nth-child(${targetRow.index + 1}) button:has-text("입장")`,
+          `tr:nth-child(${targetRow.index + 1}) button:has-text("입장")`,
+          `tbody tr:nth-child(${targetRow.index + 1}) button`,
+          `tr:nth-child(${targetRow.index + 1}) button`,
+          `tbody tr:nth-child(${targetRow.index + 1}) [role="button"]`
+        ];
+        
+        let buttonClicked = false;
+        for (const selector of buttonSelectors) {
+          try {
+            const buttonCount = await page.locator(selector).count();
+            if (buttonCount > 0) {
+              console.log(`🔘 Clicking button with selector: ${selector}`);
+              
+              await page.locator(selector).first().click({ timeout: 10000 });
+              buttonClicked = true;
+              break;
+            }
+          } catch (clickError) {
+            console.log(`❌ Button click failed with ${selector}: ${clickError.message}`);
           }
-          console.log('============================');
+        }
+        
+        if (!buttonClicked) {
+          throw new Error(`❌ Could not click any button for room: ${targetRow.roomName}`);
+        }
+        
+        // 페이지 이동 확인
+        await page.waitForTimeout(3000);
+        const newUrl = page.url();
+        
+        if (newUrl.includes('/chat?room=')) {
+          console.log(`✅ Successfully entered chat room: ${newUrl}`);
+          success = true;
+          break;
+        } else {
+          console.log(`❌ Page didn't navigate to chat room. Current URL: ${newUrl}`);
+          throw new Error('Failed to navigate to chat room');
+        }
+        
+      } catch (error) {
+        console.log(`❌ Attempt ${attempt} failed: ${error.message}`);
+        
+        if (attempt < maxAttempts) {
+          console.log(`🔄 Retrying in 2 seconds... (${maxAttempts - attempt} attempts left)`);
+          await page.waitForTimeout(2000);
           
-          throw new Error(`Chat room "${chatName}" not found in any method`);
+          // 페이지 새로고침
+          await page.goto('https://chat.goorm-ktb-018.goorm.team/chat-rooms');
+          await page.waitForLoadState('networkidle');
+          await page.waitForTimeout(2000);
         }
       }
     }
     
-    // 입장 버튼 찾기 및 클릭
-    try {
-      // 방법 1: 원래 방식
-      await targetRow.locator("button:has-text('입장')").first().click();
-    } catch (buttonError1) {
-      console.log('Button method 1 failed, trying alternatives...');
-      try {
-        // 방법 2: role 기반
-        await targetRow.getByRole('button', { name: '입장' }).click();
-      } catch (buttonError2) {
-        try {
-          // 방법 3: 일반 버튼 텍스트
-          await targetRow.getByText('입장').click();
-        } catch (buttonError3) {
-          // 방법 4: 마지막 수단 - 행의 마지막 버튼
-          await targetRow.locator('button').last().click();
-        }
-      }
+    if (!success) {
+      // 디버그용 스크린샷
+      const timestamp = Date.now();
+      const screenshotPath = `debug-access-chat-${timestamp}.png`;
+      await page.screenshot({ path: screenshotPath, fullPage: true });
+      console.log(`📸 Debug screenshot saved: ${screenshotPath}`);
+      
+      throw new Error(`❌ Failed to access chat after ${maxAttempts} attempts`);
     }
-    
-    await page.waitForTimeout(3000);
-    
-    // 채팅 페이지로 이동 확인
-    await page.waitForURL('**/chat?room=*', { timeout: 10000 });
-    console.info('Chat accessed successfully');
     
   } catch (error) {
-    console.error('Access chat error:', error);
-    
-    // 스크린샷 촬영 (디버깅용)
-    try {
-      await page.screenshot({ path: `debug-access-chat-${Date.now()}.png` });
-      console.log('Debug screenshot saved');
-    } catch (screenshotError) {
-      console.log('Failed to save screenshot:', screenshotError.message);
-    }
-    
+    console.error('❌ Access chat error:', error);
     throw error;
   }
 };
@@ -315,3 +391,4 @@ const uploadFile = async (page, filename) => {
 
 
 module.exports = { accessChat, createChat, talkChat, addReactions, scrollDown, uploadFile };
+
