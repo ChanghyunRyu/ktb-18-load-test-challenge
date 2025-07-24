@@ -332,13 +332,28 @@ class FileService {
   }
 
   getPreviewUrl(file, withAuth = true) {
-    if (!file?.filename) return '';
+    console.log('getPreviewUrl called with:', { 
+      file: file, 
+      withAuth,
+      hasFilename: !!file?.filename,
+      storageType: file?.storageType,
+      hasS3Url: !!file?.s3Url,
+      s3Url: file?.s3Url
+    });
+    
+    if (!file?.filename) {
+      console.log('getPreviewUrl: No filename found');
+      return '';
+    }
 
     // S3 파일인 경우 직접 S3 URL 사용
-    if (file.storageType === 's3' && file.s3Url) {
+    // storageType이 's3'이거나 s3Url이 있는 경우
+    if ((file.storageType === 's3' || file.s3Url) && file.s3Url) {
+      console.log('getPreviewUrl: Using S3 URL (detected S3 file):', file.s3Url);
       return file.s3Url;
     }
 
+    console.log('getPreviewUrl: Using local API URL for filename (local file):', file.filename);
     const baseUrl = `${process.env.NEXT_PUBLIC_API_URL}/api/files/view/${file.filename}`;
     
     if (!withAuth) return baseUrl;

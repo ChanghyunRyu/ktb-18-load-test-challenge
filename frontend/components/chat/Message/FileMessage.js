@@ -56,10 +56,16 @@ const FileMessage = ({
 
   useEffect(() => {
     if (msg?.file) {
+      console.log('FileMessage - msg.file object:', msg.file);
+      console.log('FileMessage - storageType:', msg.file.storageType);
+      console.log('FileMessage - s3Url:', msg.file.s3Url);
+      
       const url = fileService.getPreviewUrl(msg.file, true);
       setPreviewUrl(url);
       console.debug('Preview URL generated:', {
         filename: msg.file.filename,
+        storageType: msg.file.storageType,
+        s3Url: msg.file.s3Url,
         url
       });
     }
