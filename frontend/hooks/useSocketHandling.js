@@ -34,6 +34,21 @@ export const useSocketHandling = (router, maxRetries = 5) => { // 최대 재시�
     setIsReconnecting(true);
     
     try {
+      // 로그인되지 않은 사용자의 에러는 무시
+      const user = authService.getCurrentUser();
+      if (!user?.token) {
+        console.log('Connection error for non-authenticated user, ignoring');
+        setIsReconnecting(false);
+        return;
+      }
+      
+      // NO_AUTH_DATA는 로그인 안 된 사용자의 정상적인 상황
+      if (error?.message === 'NO_AUTH_DATA') {
+        console.log('Socket connection skipped for non-authenticated user');
+        setIsReconnecting(false);
+        return;
+      }
+      
       if (error?.message?.includes('세션') || 
           error?.message?.includes('인증') || 
           error?.message?.includes('토큰')) {

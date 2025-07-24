@@ -163,8 +163,11 @@ export const useRoomHandling = (
 
     } catch (error) {
       console.error('Socket setup error:', error);
-      if (error.message === 'Invalid authentication state') {
-        router.replace('/?error=auth_required');
+      if (error.message === 'Invalid authentication state' || 
+          error.message === 'NO_AUTH_DATA') {
+        // 로그인되지 않은 사용자의 Socket 연결 실패는 정상적인 상황
+        console.log('Socket connection skipped for non-authenticated user');
+        return null;
       }
       throw error;
     }

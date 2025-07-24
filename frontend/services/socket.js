@@ -66,6 +66,13 @@ class SocketService {
   }
 
   async connect(options = {}) {
+    // 로그인된 사용자만 Socket 연결 허용
+    const user = authService.getCurrentUser();
+    if (!user?.token || !user?.sessionId) {
+      console.log('[Socket] No authentication data, skipping connection');
+      throw new Error('NO_AUTH_DATA');
+    }
+
     if (this.connectionPromise) {
       return this.connectionPromise;
     }
@@ -138,6 +145,15 @@ class SocketService {
 
     this.socket.on('connect_error', (error) => {
       console.error('[Socket] Connection error:', error);
+      
+      // 로그인되지 않은 사용자의 연결 에러는 무시
+      const user = authService.getCurrentUser();
+      if (!user?.token) {
+        console.log('[Socket] Connection error for non-authenticated user, ignoring');
+        clearTimeout(connectionTimeout);
+        reject(new Error('NO_AUTH_DATA'));
+        return;
+      }
       
       if (error.message === 'Invalid session') {
         authService.refreshToken()
@@ -247,6 +263,13 @@ class SocketService {
     console.error(`Connection error (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}):`, error);
 
     if (error.message.includes('auth')) {
+      // 로그인되지 않은 사용자의 auth 에러는 무시
+      const user = authService.getCurrentUser();
+      if (!user?.token) {
+        console.log('[Socket] Auth error for non-authenticated user, ignoring');
+        return;
+      }
+      
       authService.refreshToken()
         .then(() => this.reconnect())
         .catch(() => {
