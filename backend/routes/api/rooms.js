@@ -201,24 +201,45 @@ router.post('/', auth, async (req, res) => {
     });
 
     const savedRoom = await newRoom.save();
-    const populatedRoom = await Room.findById(savedRoom._id)
-      .populate('creator', 'name email')
-      .populate('participants', 'name email');
+    
+    // 저장된 객체를 직접 populate (더 안전한 방법)
+    await savedRoom.populate([
+      { path: 'creator', select: 'name email' },
+      { path: 'participants', select: 'name email' }
+    ]);
+    
+    // 백업: populate가 실패한 경우 다시 조회 시도
+    let populatedRoom = savedRoom;
+    if (!savedRoom.creator || !savedRoom.participants) {
+      console.warn('Direct populate failed, trying findById approach...');
+      populatedRoom = await Room.findById(savedRoom._id)
+        .populate('creator', 'name email')
+        .populate('participants', 'name email');
+      
+      // 여전히 실패한 경우 방어적 처리
+      if (!populatedRoom) {
+        console.error('Failed to populate room data for room:', savedRoom._id);
+        return res.status(500).json({
+          success: false,
+          message: '채팅방 생성은 완료되었지만 데이터 조회에 실패했습니다.'
+        });
+      }
+    }
+    
+    // 안전하게 객체 변환
+    const roomData = {
+      ...populatedRoom.toObject(),
+      password: undefined
+    };
     
     // Socket.IO를 통해 새 채팅방 생성 알림
     if (io) {
-      io.to('room-list').emit('roomCreated', {
-        ...populatedRoom.toObject(),
-        password: undefined
-      });
+      io.to('room-list').emit('roomCreated', roomData);
     }
     
     res.status(201).json({
       success: true,
-      data: {
-        ...populatedRoom.toObject(),
-        password: undefined
-      }
+      data: roomData
     });
   } catch (error) {
     console.error('방 생성 에러:', error);

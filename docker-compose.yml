@@ -1,0 +1,88 @@
+version: '3.8'
+
+# 호스트 재부팅 후 자동 시작을 위한 설정
+services:
+  backend-1:
+    image: 2721ckd/ktb-chat-backend:latest
+    container_name: ktb-chat-backend-1
+    ports:
+      - "5001:5000"
+    env_file:
+      - backend.env
+    volumes:
+      - ./uploads1:/app/uploads
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  backend-2:
+    image: 2721ckd/ktb-chat-backend:latest
+    container_name: ktb-chat-backend-2
+    ports:
+      - "5002:5000"
+    env_file:
+      - backend.env
+    volumes:
+      - ./uploads2:/app/uploads
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  backend-3:
+    image: 2721ckd/ktb-chat-backend:latest
+    container_name: ktb-chat-backend-3
+    ports:
+      - "5003:5000"
+    env_file:
+      - backend.env
+    volumes:
+      - ./uploads3:/app/uploads
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  backend-4:
+    image: 2721ckd/ktb-chat-backend:latest
+    container_name: ktb-chat-backend-4
+    ports:
+      - "5004:5000"
+    env_file:
+      - backend.env
+    volumes:
+      - ./uploads4:/app/uploads
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  backend-5:
+    image: 2721ckd/ktb-chat-backend:latest
+    container_name: ktb-chat-backend-5
+    ports:
+      - "5005:5000"
+    env_file:
+      - backend.env
+    volumes:
+      - ./uploads5:/app/uploads
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s 
