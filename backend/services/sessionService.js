@@ -46,7 +46,7 @@ class SessionService {
       }
 
       if (ttl) {
-        await redisClient.setEx(key, ttl, jsonString);
+        await redisClient.setex(key, ttl, jsonString);
       } else {
         await redisClient.set(key, jsonString);
       }
@@ -99,9 +99,9 @@ class SessionService {
       }
 
       // 세션 ID 매핑 저장 - 문자열 값은 직접 저장
-      await redisClient.setEx(sessionIdKey, this.SESSION_TTL, userId.toString());
-      await redisClient.setEx(userSessionsKey, this.SESSION_TTL, sessionId);
-      await redisClient.setEx(activeSessionKey, this.SESSION_TTL, sessionId);
+      await redisClient.setex(sessionIdKey, this.SESSION_TTL, userId.toString());
+      await redisClient.setex(userSessionsKey, this.SESSION_TTL, sessionId);
+      await redisClient.setex(activeSessionKey, this.SESSION_TTL, sessionId);
 
       return {
         sessionId,
