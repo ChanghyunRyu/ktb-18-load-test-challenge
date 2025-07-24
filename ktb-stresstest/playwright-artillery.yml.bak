@@ -1,0 +1,17 @@
+config:
+  target: http://goorm-ktb-002.goorm.team/
+
+  phases:
+  - duration: 100
+    arrivalRate: 3
+
+  engines:
+    playwright:
+      launchOptions:
+        headless: true
+    
+  processor: "./stresstest/app.js"
+
+scenarios:
+  - engine: playwright
+    flowFunction: "loginUser" 
