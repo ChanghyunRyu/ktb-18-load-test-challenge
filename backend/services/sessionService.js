@@ -20,20 +20,32 @@ class SessionService {
   }
 
   // 안전한 JSON 파싱
-  static safeParse(data) {
+  static safeParse(value) {
     try {
-      if (!data) return null;
-      if (typeof data === 'object') return data;
-      if (typeof data !== 'string') return null;
-      
-      // 이미 객체인 경우 즉시 반환
-      if (data === '[object Object]') return null;
-      
-      return JSON.parse(data);
+      if (!value) return null;
+      if (typeof value === 'object') return value;
+      return JSON.parse(value);
     } catch (error) {
       console.error('JSON parse error:', error);
       return null;
     }
+  }
+
+  // 세션 키 생성 함수들
+  static getSessionKey(userId) {
+    return `${this.SESSION_PREFIX}${userId}`;
+  }
+
+  static getSessionIdKey(sessionId) {
+    return `${this.SESSION_ID_PREFIX}${sessionId}`;
+  }
+
+  static getUserSessionsKey(userId) {
+    return `${this.USER_SESSIONS_PREFIX}${userId}`;
+  }
+
+  static getActiveSessionKey(userId) {
+    return `${this.ACTIVE_SESSION_PREFIX}${userId}`;
   }
 
   // Redis에 데이터 저장 전 JSON 문자열로 변환
@@ -53,6 +65,9 @@ class SessionService {
       return true;
     } catch (error) {
       console.error('Redis setJson error:', error);
+      if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+        throw new Error('REDIS_CONNECTION_FAILED');
+      }
       return false;
     }
   }
@@ -64,8 +79,15 @@ class SessionService {
       return this.safeParse(value);
     } catch (error) {
       console.error('Redis getJson error:', error);
+      if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+        throw new Error('REDIS_CONNECTION_FAILED');
+      }
       return null;
     }
+  }
+
+  static generateSessionId() {
+    return crypto.randomBytes(32).toString('hex');
   }
 
   static async createSession(userId, metadata = {}) {
@@ -111,6 +133,11 @@ class SessionService {
 
     } catch (error) {
       console.error('Session creation error:', error);
+      
+      if (error.message === 'REDIS_CONNECTION_FAILED') {
+        throw new Error('Redis 연결에 실패했습니다. 잠시 후 다시 시도해주세요.');
+      }
+      
       throw new Error('세션 생성 중 오류가 발생했습니다.');
     }
   }
@@ -334,26 +361,6 @@ class SessionService {
       console.error('Get active session error:', error);
       return null;
     }
-  }
-
-  static getSessionKey(userId) {
-    return `${this.SESSION_PREFIX}${userId}`;
-  }
-
-  static getSessionIdKey(sessionId) {
-    return `${this.SESSION_ID_PREFIX}${sessionId}`;
-  }
-
-  static getUserSessionsKey(userId) {
-    return `${this.USER_SESSIONS_PREFIX}${userId}`;
-  }
-
-  static getActiveSessionKey(userId) {
-    return `${this.ACTIVE_SESSION_PREFIX}${userId}`;
-  }
-
-  static generateSessionId() {
-    return crypto.randomBytes(32).toString('hex');
   }
 }
 

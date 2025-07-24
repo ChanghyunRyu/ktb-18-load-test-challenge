@@ -7,6 +7,7 @@ const socketIO = require('socket.io');
 const path = require('path');
 const { router: roomsRouter, initializeSocket } = require('./routes/api/rooms');
 const routes = require('./routes');
+const { checkRedisConnection } = require('./utils/redisClient');
 
 const app = express();
 const server = http.createServer(app);
@@ -101,19 +102,37 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 서버 시작
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => {
+// 서버 시작 - MongoDB와 Redis 연결 확인
+const startServer = async () => {
+  try {
+    // MongoDB 연결
+    await mongoose.connect(process.env.MONGO_URI);
     console.log('MongoDB Connected');
+
+    // Redis 연결 확인
+    const isRedisConnected = await checkRedisConnection();
+    if (!isRedisConnected) {
+      console.error('⚠️  Redis connection failed - Server will start but session management may not work properly');
+    }
+
+    // 서버 시작
     server.listen(PORT, '0.0.0.0', () => {
       console.log(`Server running on port ${PORT}`);
       console.log('Environment:', process.env.NODE_ENV);
       console.log('API Base URL:', `http://0.0.0.0:${PORT}/api`);
+      
+      // 연결 상태 요약
+      console.log('\n=== Connection Status ===');
+      console.log('MongoDB: ✅ Connected');
+      console.log(`Redis: ${isRedisConnected ? '✅ Connected' : '❌ Disconnected'}`);
+      console.log('=========================\n');
     });
-  })
-  .catch(err => {
+  } catch (err) {
     console.error('Server startup error:', err);
     process.exit(1);
-  });
+  }
+};
+
+startServer();
 
 module.exports = { app, server };

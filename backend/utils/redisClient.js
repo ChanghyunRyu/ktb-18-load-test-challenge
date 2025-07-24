@@ -20,6 +20,10 @@ if (process.env.REDIS_CLUSTER_MODE === 'true') {
     redisOptions: process.env.REDIS_PASSWORD
       ? { password: process.env.REDIS_PASSWORD }
       : {},
+    enableOfflineQueue: false,
+    retryDelayOnFailover: 100,
+    maxRetriesPerRequest: 3,
+    lazyConnect: true
   });
 } else {
   // 단일 Redis 모드
@@ -27,7 +31,50 @@ if (process.env.REDIS_CLUSTER_MODE === 'true') {
     host: process.env.REDIS_HOST || '127.0.0.1',
     port: process.env.REDIS_PORT || 6379,
     password: process.env.REDIS_PASSWORD || undefined,
+    enableOfflineQueue: false,
+    retryDelayOnFailover: 100,
+    maxRetriesPerRequest: 3,
+    lazyConnect: true
   });
 }
 
+// Redis 연결 이벤트 리스너
+redis.on('connect', () => {
+  console.log('Redis Client: Connection established');
+});
+
+redis.on('ready', () => {
+  console.log('Redis Client: Ready to receive commands');
+});
+
+redis.on('error', (error) => {
+  console.error('Redis Client: Connection error:', error.message);
+});
+
+redis.on('close', () => {
+  console.log('Redis Client: Connection closed');
+});
+
+redis.on('reconnecting', () => {
+  console.log('Redis Client: Attempting to reconnect...');
+});
+
+redis.on('end', () => {
+  console.log('Redis Client: Connection ended');
+});
+
+// Redis 연결 상태 확인 함수
+const checkRedisConnection = async () => {
+  try {
+    await redis.ping();
+    console.log('Redis Client: Connection test successful');
+    return true;
+  } catch (error) {
+    console.error('Redis Client: Connection test failed:', error.message);
+    return false;
+  }
+};
+
+// Redis 클라이언트와 연결 체크 함수 내보내기
 module.exports = redis;
+module.exports.checkRedisConnection = checkRedisConnection;
