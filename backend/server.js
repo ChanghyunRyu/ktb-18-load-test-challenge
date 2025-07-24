@@ -75,27 +75,8 @@ app.get('/health', (req, res) => {
 // API 라우트 마운트
 app.use('/api', routes);
 
-// Socket.IO Redis Adapter 설정
-const { createAdapter } = require('@socket.io/redis-adapter');
-const { createClient } = require('redis');
-
-// Redis 클라이언트 생성 (Socket.IO 전용)
-const pubClient = createClient({
-  url: process.env.REDIS_URL || 'redis://localhost:6379',
-  retry_strategy: (times) => Math.min(times * 50, 2000)
-});
-
-const subClient = pubClient.duplicate();
-
-// Socket.IO 설정 with Redis Adapter
-const io = socketIO(server, { 
-  cors: corsOptions,
-  adapter: createAdapter(pubClient, subClient)
-});
-
-// Redis 연결
-pubClient.on('error', (err) => console.error('Redis pub client error:', err));
-subClient.on('error', (err) => console.error('Redis sub client error:', err));
+// Socket.IO 설정 (Redis 연결 후 Adapter 설정)
+const io = socketIO(server, { cors: corsOptions });
 
 require('./sockets/chat')(io);
 
@@ -135,14 +116,49 @@ const startServer = async () => {
       console.error('⚠️  Redis connection failed - Server will start but session management may not work properly');
     }
 
-    // Socket.IO Redis 클라이언트 연결
+    // Socket.IO Redis Adapter 설정 (동적)
+    let redisAdapterConnected = false;
     try {
+      const { createAdapter } = require('@socket.io/redis-adapter');
+      const { createClient } = require('redis');
+
+      // Redis 클라이언트 생성 (최적화)
+      const pubClient = createClient({
+        url: process.env.REDIS_URL || 'redis://localhost:6379',
+        socket: {
+          reconnectStrategy: (retries) => Math.min(retries * 50, 500),
+          connectTimeout: 5000,   // 5초로 단축
+          commandTimeout: 2000,   // 2초로 단축  
+          keepAlive: 30000       // Keep-alive 추가
+        },
+        // 연결 풀 최적화
+        lazyConnect: false,       // 즉시 연결
+        maxRetriesPerRequest: 2   // 재시도 최소화
+      });
+
+      const subClient = pubClient.duplicate();
+
+      // 연결 대기 (순차적)
       await pubClient.connect();
       await subClient.connect();
+
+      // Socket.IO Adapter 설정
+      io.adapter(createAdapter(pubClient, subClient));
+      
+      redisAdapterConnected = true;
       console.log('✅ Socket.IO Redis Adapter Connected');
+      
+      // 에러 핸들링
+      pubClient.on('error', (err) => {
+        console.error('Redis pub client error:', err);
+      });
+      subClient.on('error', (err) => {
+        console.error('Redis sub client error:', err);
+      });
+
     } catch (redisError) {
       console.error('❌ Socket.IO Redis Adapter connection failed:', redisError);
-      console.error('⚠️  Server will start but real-time features may not work across multiple servers');
+      console.error('⚠️  Server will start with in-memory adapter (real-time features may not work across multiple servers)');
     }
 
     // 서버 시작
@@ -155,7 +171,7 @@ const startServer = async () => {
       console.log('\n=== Connection Status ===');
       console.log('MongoDB: ✅ Connected');
       console.log(`Redis (Sessions): ${isRedisConnected ? '✅ Connected' : '❌ Disconnected'}`);
-      console.log(`Redis (Socket.IO): ${pubClient.isReady && subClient.isReady ? '✅ Connected' : '❌ Disconnected'}`);
+      console.log(`Redis (Socket.IO): ${redisAdapterConnected ? '✅ Connected' : '❌ Disconnected'}`);
       console.log('=========================\n');
     });
   } catch (err) {

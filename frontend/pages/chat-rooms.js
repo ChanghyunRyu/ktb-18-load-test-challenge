@@ -211,14 +211,14 @@ function ChatRoomsComponent() {
       }
       authService.logout();
       if (router.pathname !== '/') {
-        router.replace('/?error=session_expired');
+      router.replace('/?error=session_expired');
       }
       return false;
     } catch (error) {
       console.error('Auth error handling failed:', error);
       authService.logout();
       if (router.pathname !== '/') {
-        router.replace('/?error=auth_error');
+      router.replace('/?error=auth_error');
       }
       return false;
     }
@@ -612,7 +612,7 @@ function ChatRoomsComponent() {
         await authService.logout();
         // 이미 로그인 페이지에 있으면 리다이렉트하지 않음
         if (router.pathname !== '/') {
-          router.replace('/?error=session_expired');
+        router.replace('/?error=session_expired');
         }
         return;
       }

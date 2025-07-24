@@ -137,93 +137,40 @@ const authController = {
         });
       }
 
-      // 기존 세션 확인 시도
-      let existingSession = null;
+      // 기존 세션 확인 및 처리 (간소화)
       try {
-        existingSession = await SessionService.getActiveSession(user._id);
-      } catch (sessionError) {
-        console.error('Session check error:', sessionError);
-      }
-
-      if (existingSession) {
-        const io = req.app.get('io');
+        const existingSession = await SessionService.getActiveSession(user._id);
         
-        if (io) {
-          try {
-            // 중복 로그인 이벤트 발생 시 더 자세한 정보 제공
+        if (existingSession) {
+          console.log('Existing session found for user:', user._id);
+          
+          const io = req.app.get('io');
+          if (io && existingSession.socketId) {
+            // 기존 연결에 중복 로그인 알림
             io.to(existingSession.socketId).emit('duplicate_login', {
               type: 'new_login_attempt',
               deviceInfo: req.headers['user-agent'],
               ipAddress: req.ip,
               timestamp: Date.now(),
-              location: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
-              browser: req.headers['user-agent']
+              message: '다른 기기에서 로그인했습니다.'
             });
 
-            // Promise 기반의 응답 대기 로직 개선
-            const response = await new Promise((resolve, reject) => {
-              const timeout = setTimeout(() => {
-                reject(new Error('DUPLICATE_LOGIN_TIMEOUT'));
-              }, 60000); // 60초 타임아웃
-
-              const cleanup = () => {
-                clearTimeout(timeout);
-                io.removeListener('force_login', handleForceLogin);
-                io.removeListener('keep_existing_session', handleKeepSession);
-              };
-
-              const handleForceLogin = async (data) => {
-                try {
-                  if (data.token === existingSession.token) {
-                    // 기존 세션 종료 및 소켓 연결 해제
-                    await SessionService.removeSession(user._id, existingSession.sessionId);
-                    io.to(existingSession.socketId).emit('session_terminated', {
-                      reason: 'new_login',
-                      message: '다른 기기에서 로그인하여 현재 세션이 종료되었습니다.'
-                    });
-                    resolve('force_login');
-                  } else {
-                    reject(new Error('INVALID_TOKEN'));
-                  }
-                } catch (error) {
-                  reject(error);
-                } finally {
-                  cleanup();
-                }
-              };
-
-              const handleKeepSession = () => {
-                cleanup();
-                resolve('keep_existing');
-              };
-
-              io.once('force_login', handleForceLogin);
-              io.once('keep_existing_session', handleKeepSession);
-            });
-
-            // 응답에 따른 처리
-            if (response === 'keep_existing') {
-              return res.status(409).json({
-                success: false,
-                code: 'DUPLICATE_LOGIN_REJECTED',
-                message: '기존 세션을 유지하도록 선택되었습니다.'
+            // 짧은 지연 후 기존 세션 종료
+            setTimeout(() => {
+              io.to(existingSession.socketId).emit('session_ended', {
+                reason: 'duplicate_login',
+                message: '다른 기기에서 로그인하여 현재 세션이 종료되었습니다.'
               });
-            }
-
-          } catch (error) {
-            if (error.message === 'DUPLICATE_LOGIN_TIMEOUT') {
-              return res.status(409).json({
-                success: false,
-                code: 'DUPLICATE_LOGIN_TIMEOUT',
-                message: '중복 로그인 요청이 시간 초과되었습니다.'
-              });
-            }
-            throw error;
+            }, 2000);
           }
-        } else {
-          // Socket.IO 연결이 없는 경우 자동으로 기존 세션 종료
-          await SessionService.removeAllUserSessions(user._id);
+
+          // 기존 세션 제거
+          await SessionService.removeSession(user._id, existingSession.sessionId);
+          console.log('Removed existing session for user:', user._id);
         }
+      } catch (sessionError) {
+        console.error('Session management error:', sessionError);
+        // 세션 오류는 로그만 남기고 진행
       }
 
       // 새 세션 생성
@@ -276,6 +223,7 @@ const authController = {
     } catch (error) {
       console.error('Login error:', error);
       
+      // 구체적인 오류 처리
       if (error.message === 'INVALID_TOKEN') {
         return res.status(401).json({
           success: false,
@@ -283,10 +231,27 @@ const authController = {
         });
       }
       
+      if (error.message === 'DUPLICATE_LOGIN_TIMEOUT') {
+        return res.status(409).json({
+          success: false,
+          code: 'DUPLICATE_LOGIN_TIMEOUT',
+          message: '중복 로그인 처리 중 시간 초과가 발생했습니다.'
+        });
+      }
+
+      // 세션 생성 실패 처리
+      if (error.message === 'Session creation failed') {
+        return res.status(500).json({
+          success: false,
+          code: 'SESSION_ERROR',
+          message: '세션 생성에 실패했습니다. 잠시 후 다시 시도해주세요.'
+        });
+      }
+      
       res.status(500).json({
         success: false,
         message: '로그인 처리 중 오류가 발생했습니다.',
-        code: error.code || 'UNKNOWN_ERROR'
+        code: error.code || 'LOGIN_ERROR'
       });
     }
   },
@@ -341,17 +306,38 @@ const authController = {
         console.log('Missing token or sessionId:', { token: !!token, sessionId: !!sessionId });
         return res.status(401).json({
           success: false,
-          message: '인증 정보가 제공되지 않았습니다.'
+          message: '인증 정보가 제공되지 않았습니다.',
+          code: 'MISSING_AUTH_DATA'
         });
       }
 
       // JWT 토큰 검증
-      const decoded = jwt.verify(token, jwtSecret);
+      let decoded;
+      try {
+        decoded = jwt.verify(token, jwtSecret);
+      } catch (jwtError) {
+        console.error('JWT verification failed:', jwtError.message);
+        
+        if (jwtError.name === 'TokenExpiredError') {
+          return res.status(401).json({
+            success: false,
+            message: '토큰이 만료되었습니다.',
+            code: 'TOKEN_EXPIRED'
+          });
+        }
+        
+        return res.status(401).json({
+          success: false,
+          message: '유효하지 않은 토큰입니다.',
+          code: 'INVALID_TOKEN'
+        });
+      }
       
       if (!decoded?.user?.id || !decoded?.sessionId) {
         return res.status(401).json({
           success: false,
-          message: '유효하지 않은 토큰입니다.'
+          message: '토큰 payload가 유효하지 않습니다.',
+          code: 'INVALID_TOKEN_PAYLOAD'
         });
       }
 
@@ -359,36 +345,60 @@ const authController = {
       if (decoded.sessionId !== sessionId) {
         return res.status(401).json({
           success: false,
-          message: '세션 정보가 일치하지 않습니다.'
+          message: '세션 정보가 일치하지 않습니다.',
+          code: 'SESSION_MISMATCH'
         });
       }
 
       // 사용자 정보 조회
-      const user = await User.findById(decoded.user.id);
-      if (!user) {
-        return res.status(404).json({
+      let user;
+      try {
+        user = await User.findById(decoded.user.id);
+        if (!user) {
+          return res.status(404).json({
+            success: false,
+            message: '사용자를 찾을 수 없습니다.',
+            code: 'USER_NOT_FOUND'
+          });
+        }
+      } catch (userError) {
+        console.error('User lookup error:', userError);
+        return res.status(500).json({
           success: false,
-          message: '사용자를 찾을 수 없습니다.'
+          message: '사용자 조회 중 오류가 발생했습니다.',
+          code: 'USER_LOOKUP_ERROR'
         });
       }
 
       // 세션 검증
-      const validationResult = await SessionService.validateSession(user._id, sessionId);
-      if (!validationResult.isValid) {
-        console.log('Invalid session:', validationResult);
-        return res.status(401).json({
+      let validationResult;
+      try {
+        validationResult = await SessionService.validateSession(user._id, sessionId);
+        if (!validationResult.isValid) {
+          console.log('Session validation failed:', validationResult);
+          return res.status(401).json({
+            success: false,
+            code: validationResult.error || 'INVALID_SESSION',
+            message: validationResult.message || '세션이 유효하지 않습니다.'
+          });
+        }
+      } catch (sessionError) {
+        console.error('Session validation error:', sessionError);
+        return res.status(500).json({
           success: false,
-          code: validationResult.error,
-          message: validationResult.message
+          message: '세션 검증 중 오류가 발생했습니다.',
+          code: 'SESSION_VALIDATION_ERROR'
         });
       }
 
-      // 세션 갱신
-      await SessionService.refreshSession(user._id, sessionId);
+      // 세션 갱신 (비동기로 처리 - 결과를 기다리지 않음)
+      SessionService.refreshSession(user._id, sessionId).catch(refreshError => {
+        console.error('Session refresh error (non-blocking):', refreshError);
+      });
 
       console.log('Token verification successful for user:', user._id);
 
-      // 프로필 업데이트 필요 여부 확인
+      // 응답 헤더 설정
       if (validationResult.needsProfileRefresh) {
         res.set('X-Profile-Update-Required', 'true');
       }
@@ -406,24 +416,10 @@ const authController = {
     } catch (error) {
       console.error('Token verification error:', error);
 
-      if (error.name === 'JsonWebTokenError') {
-        return res.status(401).json({
-          success: false,
-          message: '유효하지 않은 토큰입니다.'
-        });
-      }
-
-      if (error.name === 'TokenExpiredError') {
-        return res.status(401).json({
-          success: false,
-          message: '토큰이 만료되었습니다.',
-          code: 'TOKEN_EXPIRED'
-        });
-      }
-
       res.status(500).json({
         success: false,
-        message: '토큰 검증 중 오류가 발생했습니다.'
+        message: '토큰 검증 중 예상치 못한 오류가 발생했습니다.',
+        code: 'VERIFICATION_ERROR'
       });
     }
   },

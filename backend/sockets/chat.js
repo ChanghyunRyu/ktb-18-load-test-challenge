@@ -9,72 +9,97 @@ const SessionService = require('../services/sessionService');
 const aiService = require('../services/aiService');
 
 module.exports = function(io) {
-  // Redis 클라이언트 (상태 관리용)
+  // Redis 기반 상태 관리 (분산 시스템용)
   const redisStateClient = require('../utils/redisClient');
   
-  // Redis 기반 상태 관리 클래스
+  // 누락된 변수들 추가
+  const messageQueues = new Map();
+  const streamingSessions = new Map();
+  const userRooms = new Map();
+  
+  // Redis 상태 관리 클래스 (타임아웃 추가)
   class RedisStateManager {
-    // 연결된 사용자 관리
+    // Redis 호출에 타임아웃 적용
+    static withTimeout(promise, timeoutMs = 2000) {
+      return Promise.race([
+        promise,
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error(`Redis timeout after ${timeoutMs}ms`)), timeoutMs)
+        )
+      ]);
+    }
+    
     static async setConnectedUser(userId, socketId) {
-      await redisStateClient.hset('socket:connected_users', userId, socketId);
+      try {
+        await this.withTimeout(
+          redisStateClient.hset('socket:connected_users', userId, socketId)
+        );
+      } catch (error) {
+        console.error('Redis setConnectedUser error:', error);
+      }
     }
     
     static async getConnectedUser(userId) {
-      return await redisStateClient.hget('socket:connected_users', userId);
+      try {
+        return await this.withTimeout(
+          redisStateClient.hget('socket:connected_users', userId)
+        );
+      } catch (error) {
+        console.error('Redis getConnectedUser error:', error);
+        return null;
+      }
     }
     
     static async removeConnectedUser(userId) {
-      await redisStateClient.hdel('socket:connected_users', userId);
+      try {
+        await this.withTimeout(
+          redisStateClient.hdel('socket:connected_users', userId)
+        );
+      } catch (error) {
+        console.error('Redis removeConnectedUser error:', error);
+      }
     }
     
-    // 사용자 룸 관리
     static async setUserRoom(socketId, roomId) {
-      await redisStateClient.hset('socket:user_rooms', socketId, roomId);
+      try {
+        await this.withTimeout(
+          redisStateClient.hset('socket:user_rooms', socketId, roomId)
+        );
+      } catch (error) {
+        console.error('Redis setUserRoom error:', error);
+      }
     }
     
     static async getUserRoom(socketId) {
-      return await redisStateClient.hget('socket:user_rooms', socketId);
+      try {
+        return await this.withTimeout(
+          redisStateClient.hget('socket:user_rooms', socketId)
+        );
+      } catch (error) {
+        console.error('Redis getUserRoom error:', error);
+        return null;
+      }
     }
     
     static async removeUserRoom(socketId) {
-      await redisStateClient.hdel('socket:user_rooms', socketId);
-    }
-    
-    // 스트리밍 세션 관리
-    static async setStreamingSession(sessionId, data) {
-      await redisStateClient.setex(`socket:streaming:${sessionId}`, 3600, JSON.stringify(data));
-    }
-    
-    static async getStreamingSession(sessionId) {
-      const data = await redisStateClient.get(`socket:streaming:${sessionId}`);
-      return data ? JSON.parse(data) : null;
-    }
-    
-    static async removeStreamingSession(sessionId) {
-      await redisStateClient.del(`socket:streaming:${sessionId}`);
-    }
-    
-    // 메시지 큐 관리
-    static async addToMessageQueue(socketId, message) {
-      await redisStateClient.lpush(`socket:queue:${socketId}`, JSON.stringify(message));
-      await redisStateClient.expire(`socket:queue:${socketId}`, 300); // 5분 만료
-    }
-    
-    static async getMessageQueue(socketId) {
-      const messages = await redisStateClient.lrange(`socket:queue:${socketId}`, 0, -1);
-      return messages.map(msg => JSON.parse(msg));
-    }
-    
-    static async clearMessageQueue(socketId) {
-      await redisStateClient.del(`socket:queue:${socketId}`);
+      try {
+        await this.withTimeout(
+          redisStateClient.hdel('socket:user_rooms', socketId)
+        );
+      } catch (error) {
+        console.error('Redis removeUserRoom error:', error);
+      }
     }
   }
+
+  // 로컬 캐시용 (성능 최적화)
+  const messageLoadRetries = new Map();
   const BATCH_SIZE = 30;  // 한 번에 로드할 메시지 수
-  const LOAD_DELAY = 300; // 메시지 로드 딜레이 (ms)
-  const MAX_RETRIES = 3;  // 최대 재시도 횟수
-  const MESSAGE_LOAD_TIMEOUT = 10000; // 메시지 로드 타임아웃 (10초)
-  const RETRY_DELAY = 2000; // 재시도 간격 (2초)
-  const DUPLICATE_LOGIN_TIMEOUT = 10000; // 중복 로그인 타임아웃 (10초)
+  const LOAD_DELAY = 100; // 메시지 로드 딜레이 (ms) - 300→100으로 단축
+  const MAX_RETRIES = 2;  // 최대 재시도 횟수 - 3→2로 단축
+  const MESSAGE_LOAD_TIMEOUT = 5000; // 메시지 로드 타임아웃 (5초) - 10초→5초로 단축
+  const RETRY_DELAY = 1000; // 재시도 간격 (1초) - 2초→1초로 단축
+  const DUPLICATE_LOGIN_TIMEOUT = 5000; // 중복 로그인 타임아웃 (5초) - 10초→5초로 단축
 
   // 로깅 유틸리티 함수
   const logDebug = (action, data) => {
@@ -84,14 +109,8 @@ module.exports = function(io) {
     });
   };
 
-  // 메시지 일괄 로드 함수 개선
+  // 메시지 일괄 로드 함수 (고속 최적화)
   const loadMessages = async (socket, roomId, before, limit = BATCH_SIZE) => {
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => {
-        reject(new Error('Message loading timed out'));
-      }, MESSAGE_LOAD_TIMEOUT);
-    });
-
     try {
       // 쿼리 구성
       const query = { room: roomId };
@@ -99,45 +118,41 @@ module.exports = function(io) {
         query.timestamp = { $lt: new Date(before) };
       }
 
-      // 메시지 로드 with profileImage
-      const messages = await Promise.race([
-        Message.find(query)
-          .populate('sender', 'name email profileImage')
-          .populate({
-            path: 'file',
-            select: 'filename originalname mimetype size'
-          })
-          .sort({ timestamp: -1 })
-          .limit(limit + 1)
-          .lean(),
-        timeoutPromise
-      ]);
+      // 메시지 로드 (최적화 - 단일 populate)
+      const messages = await Message.find(query)
+        .populate('sender', 'name profileImage') // 최소 필드만
+        .populate('file', 'filename mimetype size') // 최소 필드만
+        .sort({ timestamp: -1 })
+        .limit(limit + 1)
+        .lean();
 
-      // 결과 처리
+      // 결과 처리 (빠른 처리)
       const hasMore = messages.length > limit;
-      const resultMessages = messages.slice(0, limit);
-      const sortedMessages = resultMessages.sort((a, b) => 
-        new Date(a.timestamp) - new Date(b.timestamp)
-      );
+      const resultMessages = hasMore ? messages.slice(0, limit) : messages;
+      
+      // 정렬 (이미 -1로 정렬되어 있으므로 reverse만)
+      const sortedMessages = resultMessages.reverse();
 
-      // 읽음 상태 비동기 업데이트
+      // 읽음 상태 업데이트 (비동기 - 결과를 기다리지 않음)
       if (sortedMessages.length > 0 && socket.user) {
-        const messageIds = sortedMessages.map(msg => msg._id);
-        Message.updateMany(
-          {
-            _id: { $in: messageIds },
-            'readers.userId': { $ne: socket.user.id }
-          },
-          {
-            $push: {
-              readers: {
-                userId: socket.user.id,
-                readAt: new Date()
+        setImmediate(() => {
+          const messageIds = sortedMessages.map(msg => msg._id);
+          Message.updateMany(
+            {
+              _id: { $in: messageIds },
+              'readers.userId': { $ne: socket.user.id }
+            },
+            {
+              $push: {
+                readers: {
+                  userId: socket.user.id,
+                  readAt: new Date()
+                }
               }
             }
-          }
-        ).exec().catch(error => {
-          console.error('Read status update error:', error);
+          ).exec().catch(error => {
+            console.error('Read status update error:', error);
+          });
         });
       }
 
@@ -147,21 +162,13 @@ module.exports = function(io) {
         oldestTimestamp: sortedMessages[0]?.timestamp || null
       };
     } catch (error) {
-      if (error.message === 'Message loading timed out') {
-        logDebug('message load timeout', {
-          roomId,
-          before,
-          limit
-        });
-      } else {
-        console.error('Load messages error:', {
-          error: error.message,
-          stack: error.stack,
-          roomId,
-          before,
-          limit
-        });
-      }
+      console.error('Load messages error:', {
+        error: error.message,
+        stack: error.stack,
+        roomId,
+        before,
+        limit
+      });
       throw error;
     }
   };
@@ -244,35 +251,84 @@ module.exports = function(io) {
       const sessionId = socket.handshake.auth.sessionId;
 
       if (!token || !sessionId) {
+        console.log('Missing auth data:', { token: !!token, sessionId: !!sessionId });
         return next(new Error('NO_AUTH_DATA'));
       }
 
-      const decoded = jwt.verify(token, jwtSecret);
-      if (!decoded?.user?.id) {
-        return next(new Error('Invalid token'));
-      }
-
-      // 이미 연결된 사용자인지 확인 (Redis 사용)
-      const existingSocketId = await RedisStateManager.getConnectedUser(decoded.user.id);
-      if (existingSocketId) {
-        const existingSocket = io.sockets.sockets.get(existingSocketId);
-        if (existingSocket) {
-          // 중복 로그인 처리
-          await handleDuplicateLogin(existingSocket, socket);
+      let decoded;
+      try {
+        decoded = jwt.verify(token, jwtSecret);
+      } catch (jwtError) {
+        console.error('JWT verification failed:', jwtError.message);
+        if (jwtError.name === 'TokenExpiredError') {
+          return next(new Error('TOKEN_EXPIRED'));
         }
+        return next(new Error('INVALID_TOKEN'));
       }
 
-      const validationResult = await SessionService.validateSession(decoded.user.id, sessionId);
-      if (!validationResult.isValid) {
-        console.error('Session validation failed:', validationResult);
-        return next(new Error(validationResult.message || 'Invalid session'));
+      if (!decoded?.user?.id) {
+        console.error('Invalid token payload:', decoded);
+        return next(new Error('INVALID_TOKEN_PAYLOAD'));
       }
 
-      const user = await User.findById(decoded.user.id);
-      if (!user) {
-        return next(new Error('User not found'));
+      // 세션 검증
+      try {
+        const validationResult = await SessionService.validateSession(decoded.user.id, sessionId);
+        if (!validationResult.isValid) {
+          console.error('Session validation failed:', validationResult);
+          return next(new Error(validationResult.message || 'INVALID_SESSION'));
+        }
+      } catch (sessionError) {
+        console.error('Session service error:', sessionError);
+        return next(new Error('SESSION_SERVICE_ERROR'));
       }
 
+      // 사용자 조회
+      let user;
+      try {
+        user = await User.findById(decoded.user.id);
+        if (!user) {
+          console.error('User not found:', decoded.user.id);
+          return next(new Error('USER_NOT_FOUND'));
+        }
+      } catch (userError) {
+        console.error('User lookup error:', userError);
+        return next(new Error('USER_LOOKUP_ERROR'));
+      }
+
+      // 중복 로그인 확인 (Redis 사용)
+      try {
+        const existingSocketId = await RedisStateManager.getConnectedUser(decoded.user.id);
+        if (existingSocketId && existingSocketId !== socket.id) {
+          const existingSocket = io.sockets.sockets.get(existingSocketId);
+          if (existingSocket && existingSocket.connected) {
+            console.log('Duplicate login detected, handling existing connection:', existingSocketId);
+            // 기존 연결에 알림 후 종료
+            existingSocket.emit('duplicate_login', {
+              type: 'new_login_attempt',
+              deviceInfo: socket.handshake.headers['user-agent'],
+              ipAddress: socket.handshake.address,
+              timestamp: Date.now()
+            });
+            
+            // 짧은 지연 후 기존 연결 종료
+            setTimeout(() => {
+              if (existingSocket.connected) {
+                existingSocket.emit('session_ended', {
+                  reason: 'duplicate_login',
+                  message: '다른 기기에서 로그인하여 현재 세션이 종료되었습니다.'
+                });
+                existingSocket.disconnect(true);
+              }
+            }, 1000);
+          }
+        }
+      } catch (redisError) {
+        console.error('Redis connection check error:', redisError);
+        // Redis 오류는 무시하고 진행
+      }
+
+      // 소켓에 사용자 정보 설정
       socket.user = {
         id: user._id.toString(),
         name: user.name,
@@ -281,21 +337,24 @@ module.exports = function(io) {
         profileImage: user.profileImage
       };
 
-      await SessionService.updateLastActivity(decoded.user.id);
+      // 세션 활동 시간 업데이트
+      try {
+        await SessionService.updateLastActivity(decoded.user.id);
+      } catch (activityError) {
+        console.error('Activity update error:', activityError);
+        // 비중요한 오류이므로 무시하고 진행
+      }
+
+      console.log('Socket authentication successful:', {
+        userId: user._id.toString(),
+        socketId: socket.id
+      });
+
       next();
 
     } catch (error) {
       console.error('Socket authentication error:', error);
-      
-      if (error.name === 'TokenExpiredError') {
-        return next(new Error('Token expired'));
-      }
-      
-      if (error.name === 'JsonWebTokenError') {
-        return next(new Error('Invalid token'));
-      }
-      
-      next(new Error('Authentication failed'));
+      return next(new Error('AUTHENTICATION_FAILED'));
     }
   });
   
@@ -307,8 +366,9 @@ module.exports = function(io) {
     });
 
     if (socket.user) {
-      // 이전 연결이 있는지 확인 (Redis 사용)
-      const previousSocketId = await RedisStateManager.getConnectedUser(socket.user.id);
+      try {
+        // 이전 연결이 있는지 확인 (Redis 사용)
+        const previousSocketId = await RedisStateManager.getConnectedUser(socket.user.id);
       if (previousSocketId && previousSocketId !== socket.id) {
         const previousSocket = io.sockets.sockets.get(previousSocketId);
         if (previousSocket) {
@@ -331,8 +391,11 @@ module.exports = function(io) {
         }
       }
       
-      // 새로운 연결 정보 저장 (Redis 사용)
-      await RedisStateManager.setConnectedUser(socket.user.id, socket.id);
+        // 새로운 연결 정보 저장 (Redis 사용)
+        await RedisStateManager.setConnectedUser(socket.user.id, socket.id);
+      } catch (error) {
+        console.error('Socket connection setup error:', error);
+      }
     }
 
     // 이전 메시지 로딩 처리 개선
@@ -363,6 +426,12 @@ module.exports = function(io) {
         }
 
         messageQueues.set(queueKey, true);
+        
+        // 강제 타임아웃 (10초 후 큐 해제)
+        setTimeout(() => {
+          messageQueues.delete(queueKey);
+        }, 10000);
+        
         socket.emit('messageLoadStart');
 
         const result = await loadMessagesWithRetry(socket, roomId, before);
@@ -383,9 +452,9 @@ module.exports = function(io) {
           message: error.message || '이전 메시지를 불러오는 중 오류가 발생했습니다.'
         });
       } finally {
-        setTimeout(() => {
-          messageQueues.delete(queueKey);
-        }, LOAD_DELAY);
+        // 즉시 큐 해제 (타임아웃도 유지)
+        messageQueues.delete(queueKey);
+        messageLoadRetries.delete(queueKey);
       }
     });
     
@@ -407,14 +476,17 @@ module.exports = function(io) {
           return;
         }
 
-        // 기존 방에서 나가기
+        // 기존 방에서 나가기 (빠른 처리)
         if (currentRoom) {
           logDebug('leaving current room', { 
             userId: socket.user.id, 
             roomId: currentRoom 
           });
           socket.leave(currentRoom);
-          await RedisStateManager.removeUserRoom(socket.id);
+          // Redis 업데이트는 비동기로 처리 (기다리지 않음)
+          RedisStateManager.removeUserRoom(socket.id).catch(err => 
+            console.error('Redis removeUserRoom error:', err)
+          );
           
           socket.to(currentRoom).emit('userLeft', {
             userId: socket.user.id,
@@ -437,9 +509,19 @@ module.exports = function(io) {
         }
 
         socket.join(roomId);
-        await RedisStateManager.setUserRoom(socket.id, roomId);
+        
+        // Redis 업데이트와 메시지 로딩을 병렬 처리
+        const [messageLoadResult] = await Promise.all([
+          loadMessages(socket, roomId),
+          // Redis 업데이트는 별도로 처리 (실패해도 괜찮음)
+          RedisStateManager.setUserRoom(socket.id, roomId).catch(err => 
+            console.error('Redis setUserRoom error:', err)
+          )
+        ]);
 
-        // 입장 메시지 생성
+        const { messages, hasMore, oldestTimestamp } = messageLoadResult;
+
+        // 입장 메시지 생성 (비동기로 처리)
         const joinMessage = new Message({
           room: roomId,
           content: `${socket.user.name}님이 입장하였습니다.`,
@@ -447,11 +529,10 @@ module.exports = function(io) {
           timestamp: new Date()
         });
         
-        await joinMessage.save();
-
-        // 초기 메시지 로드
-        const messageLoadResult = await loadMessages(socket, roomId);
-        const { messages, hasMore, oldestTimestamp } = messageLoadResult;
+        // 저장은 비동기로 처리 (기다리지 않음)
+        joinMessage.save().catch(err => 
+          console.error('Join message save error:', err)
+        );
 
         // 활성 스트리밍 메시지 조회
         const activeStreams = Array.from(streamingSessions.values())
@@ -471,7 +552,7 @@ module.exports = function(io) {
           participants: room.participants,
           messages,
           hasMore,
-          oldestTimestamp,
+          oldestTimestamp: messageLoadResult.oldestTimestamp,
           activeStreams
         });
 
@@ -718,10 +799,20 @@ module.exports = function(io) {
         const roomId = await RedisStateManager.getUserRoom(socket.id);
         await RedisStateManager.removeUserRoom(socket.id);
 
-        // 메시지 큐 정리 (Redis 사용)
-        await RedisStateManager.clearMessageQueue(socket.id);
+        // 메시지 큐 정리
+        const userQueues = Array.from(messageQueues.keys())
+          .filter(key => key.endsWith(`:${socket.user.id}`));
+        userQueues.forEach(key => {
+          messageQueues.delete(key);
+          messageLoadRetries.delete(key);
+        });
         
-        // 스트리밍 세션 정리 (복잡하므로 우선 생략, 필요시 별도 구현)
+        // 스트리밍 세션 정리
+        for (const [messageId, session] of streamingSessions.entries()) {
+          if (session.userId === socket.user.id) {
+            streamingSessions.delete(messageId);
+          }
+        }
 
         // 현재 방에서 자동 퇴장 처리
         if (roomId) {

@@ -356,7 +356,7 @@ class AuthService {
         return true;
       }
 
-      const response = await axiosInstance.post('/api/auth/verify-token', {
+      const response = await api.post('/api/auth/verify-token', {}, {
         headers: {
           'x-auth-token': user.token,
           'x-session-id': user.sessionId
@@ -366,21 +366,47 @@ class AuthService {
       if (response.data.success) {
         // 토큰 검증 시간 업데이트
         localStorage.setItem('lastTokenVerification', Date.now().toString());
+        
+        // 사용자 정보 업데이트 (프로필 이미지 등)
+        if (response.data.user) {
+          const updatedUser = {
+            ...user,
+            ...response.data.user,
+            token: user.token,
+            sessionId: user.sessionId,
+            lastActivity: Date.now()
+          };
+          localStorage.setItem('user', JSON.stringify(updatedUser));
+        }
+        
         return true;
       }
 
       throw new Error(response.data.message || '토큰 검증에 실패했습니다.');
     } catch (error) {
+      console.error('Token verification error:', error);
+      
       if (error.response?.status === 401) {
         try {
-          await this.refreshToken();
-          localStorage.setItem('lastTokenVerification', Date.now().toString());
-          return true;
+          const refreshed = await this.refreshToken();
+          if (refreshed) {
+            localStorage.setItem('lastTokenVerification', Date.now().toString());
+            return true;
+          }
         } catch (refreshError) {
+          console.error('Token refresh failed:', refreshError);
+          // 조용히 로그아웃 처리 (에러 토스트 없이)
           this.logout();
           throw new Error('세션이 만료되었습니다. 다시 로그인해주세요.');
         }
       }
+      
+      // 네트워크 에러나 일시적 오류는 재시도 가능하도록 처리
+      if (!error.response && error.code !== 'ECONNABORTED') {
+        console.warn('Network error during token verification, keeping session');
+        return true;
+      }
+      
       throw error;
     }
   }
@@ -388,23 +414,41 @@ class AuthService {
   async refreshToken() {
     try {
       const user = this.getCurrentUser();
-      if (!user?.token) throw new Error('인증 정보가 없습니다.');
+      if (!user?.token || !user?.sessionId) {
+        throw new Error('인증 정보가 없습니다.');
+      }
 
-      const response = await api.post('/api/auth/refresh-token');
+      const response = await api.post('/api/auth/refresh-token', {}, {
+        headers: {
+          'x-auth-token': user.token,
+          'x-session-id': user.sessionId
+        }
+      });
 
       if (response.data.success && response.data.token) {
         const updatedUser = {
           ...user,
           token: response.data.token,
+          sessionId: response.data.sessionId || user.sessionId,
           lastActivity: Date.now()
         };
         localStorage.setItem('user', JSON.stringify(updatedUser));
+        
+        // 인증 상태 변경 이벤트 발생
+        window.dispatchEvent(new Event('authStateChange'));
+        
         return response.data.token;
       }
 
       throw new Error('토큰 갱신에 실패했습니다.');
     } catch (error) {
       console.error('Token refresh error:', error);
+      
+      // 리프레시 실패 시 로그아웃
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        this.logout();
+      }
+      
       throw this._handleError(error);
     }
   }
@@ -418,14 +462,14 @@ class AuthService {
 
       // API_URL이 없으면 연결 실패로 처리
       if (!API_URL) {
-        console.warn('API_URL is not defined');
-        throw new Error('API URL이 설정되지 않았습니다.');
+        console.warn('API URL이 설정되지 않았습니다.');
+        return false;
       }
 
       console.log('Checking server at:', API_URL);
       
       const response = await api.get('/health', {
-        timeout: 3000, // 타임아웃을 3초로 단축
+        timeout: 5000, // 타임아웃을 5초로 설정
         validateStatus: (status) => status < 500 // 5xx 에러만 실제 에러로 처리
       });
       
@@ -442,7 +486,7 @@ class AuthService {
         throw new Error('네트워크 연결을 확인해주세요.');
       }
       
-      throw this._handleError(error);
+      return false;
     }
   }
 

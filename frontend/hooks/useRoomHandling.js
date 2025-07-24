@@ -68,7 +68,7 @@ export const useRoomHandling = (
       await authService.logout();
       // 이미 로그인 페이지에 있으면 리다이렉트하지 않음
       if (router.pathname !== '/') {
-        router.replace('/?redirect=' + router.asPath);
+      router.replace('/?redirect=' + router.asPath);
       }
     }
     return false;
