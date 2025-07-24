@@ -216,8 +216,25 @@ class FileService {
     }
   }
 
-  async downloadFile(filename, originalname) {
+  async downloadFile(filename, originalname, fileObj = null) {
     try {
+      // S3 파일인 경우 직접 다운로드
+      if (fileObj && ((fileObj.storageType === 's3' || fileObj.s3Url) && fileObj.s3Url)) {
+        console.log('Direct S3 download via downloadFile:', fileObj.s3Url);
+        
+        // S3에서 직접 다운로드
+        const link = document.createElement('a');
+        link.href = fileObj.s3Url;
+        link.download = originalname || filename;
+        link.target = '_blank';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        return { success: true };
+      }
+
+      // 로컬 파일인 경우 기존 로직 사용
       const user = authService.getCurrentUser();
       if (!user?.token || !user?.sessionId) {
         return {
@@ -309,7 +326,7 @@ class FileService {
         try {
           const refreshed = await authService.refreshToken();
           if (refreshed) {
-            return this.downloadFile(filename, originalname);
+            return this.downloadFile(filename, originalname, fileObj);
           }
         } catch (refreshError) {
           return {
@@ -323,9 +340,16 @@ class FileService {
     }
   }
 
-  getFileUrl(filename, forPreview = false) {
+  getFileUrl(filename, forPreview = false, fileObj = null) {
     if (!filename) return '';
 
+    // S3 파일 객체가 전달된 경우 S3 URL 직접 사용
+    if (fileObj && ((fileObj.storageType === 's3' || fileObj.s3Url) && fileObj.s3Url)) {
+      console.log('getFileUrl: Using S3 URL for file object:', fileObj.s3Url);
+      return fileObj.s3Url;
+    }
+
+    // 레거시: 파일명으로만 호출된 경우 로컬 API 경로 반환
     const baseUrl = process.env.NEXT_PUBLIC_API_URL || '';
     const endpoint = forPreview ? 'view' : 'download';
     return `${baseUrl}/api/files/${endpoint}/${filename}`;

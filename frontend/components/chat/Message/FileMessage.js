@@ -137,12 +137,26 @@ const FileMessage = ({
         throw new Error('파일 정보가 없습니다.');
       }
 
+      // S3 파일인 경우 직접 S3 URL 사용
+      if ((msg.file.storageType === 's3' || msg.file.s3Url) && msg.file.s3Url) {
+        console.log('Direct S3 download:', msg.file.s3Url);
+        const link = document.createElement('a');
+        link.href = msg.file.s3Url;
+        link.download = getDecodedFilename(msg.file.originalname);
+        link.target = '_blank';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return;
+      }
+
+      // 로컬 파일인 경우 기존 방식 사용
       const user = authService.getCurrentUser();
       if (!user?.token || !user?.sessionId) {
         throw new Error('인증 정보가 없습니다.');
       }
 
-      const baseUrl = fileService.getFileUrl(msg.file.filename, false);
+      const baseUrl = fileService.getFileUrl(msg.file.filename, false, msg.file);
       const authenticatedUrl = `${baseUrl}?token=${encodeURIComponent(user.token)}&sessionId=${encodeURIComponent(user.sessionId)}&download=true`;
 
       const link = document.createElement('a');
@@ -168,12 +182,24 @@ const FileMessage = ({
         throw new Error('파일 정보가 없습니다.');
       }
 
+      // S3 파일인 경우 직접 S3 URL 사용
+      if ((msg.file.storageType === 's3' || msg.file.s3Url) && msg.file.s3Url) {
+        console.log('Direct S3 view:', msg.file.s3Url);
+        const newWindow = window.open(msg.file.s3Url, '_blank');
+        if (!newWindow) {
+          throw new Error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
+        }
+        newWindow.opener = null;
+        return;
+      }
+
+      // 로컬 파일인 경우 기존 방식 사용
       const user = authService.getCurrentUser();
       if (!user?.token || !user?.sessionId) {
         throw new Error('인증 정보가 없습니다.');
       }
 
-      const baseUrl = fileService.getFileUrl(msg.file.filename, true);
+      const baseUrl = fileService.getFileUrl(msg.file.filename, true, msg.file);
       const authenticatedUrl = `${baseUrl}?token=${encodeURIComponent(user.token)}&sessionId=${encodeURIComponent(user.sessionId)}`;
 
       const newWindow = window.open(authenticatedUrl, '_blank');
