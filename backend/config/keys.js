@@ -14,4 +14,9 @@ module.exports = {
   redisPort: process.env.REDIS_PORT,
   openaiApiKey: process.env.OPENAI_API_KEY,
   vectorDbEndpoint: process.env.VECTOR_DB_ENDPOINT,
+  // AWS S3 설정
+  awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  awsRegion: process.env.AWS_REGION || 'ap-northeast-2',
+  s3BucketName: process.env.S3_BUCKET_NAME,
 };

@@ -1,5 +1,6 @@
 import axios, { isCancel, CancelToken } from 'axios';
 import authService from './authService';
+import s3Service from './s3Service';
 import { Toast } from '../components/Toast';
 
 class FileService {
@@ -9,6 +10,9 @@ class FileService {
     this.retryAttempts = 3;
     this.retryDelay = 1000;
     this.activeUploads = new Map();
+
+    // S3 업로드를 기본으로 사용
+    this.useS3Upload = process.env.NEXT_PUBLIC_USE_S3_UPLOAD !== 'false';
 
     this.allowedTypes = {
       image: {
@@ -101,7 +105,22 @@ class FileService {
     return { success: true };
   }
 
-  async uploadFile(file, onProgress) {
+  async uploadFile(file, onProgress, forceLocal = false) {
+    // S3 업로드 우선 사용 (환경변수로 제어 가능)
+    if (this.useS3Upload && !forceLocal) {
+      try {
+        return await s3Service.uploadFile(file, onProgress);
+      } catch (error) {
+        console.error('S3 upload failed, falling back to local upload:', error);
+        // S3 업로드 실패시 로컬 업로드로 폴백
+        return await this.uploadFileLocal(file, onProgress);
+      }
+    } else {
+      return await this.uploadFileLocal(file, onProgress);
+    }
+  }
+
+  async uploadFileLocal(file, onProgress) {
     const validationResult = await this.validateFile(file);
     if (!validationResult.success) {
       return validationResult;
@@ -179,7 +198,7 @@ class FileService {
         try {
           const refreshed = await authService.refreshToken();
           if (refreshed) {
-            return this.uploadFile(file, onProgress);
+            return this.uploadFileLocal(file, onProgress);
           }
           return {
             success: false,
@@ -196,6 +215,7 @@ class FileService {
       return this.handleUploadError(error);
     }
   }
+
   async downloadFile(filename, originalname) {
     try {
       const user = authService.getCurrentUser();
@@ -313,6 +333,11 @@ class FileService {
 
   getPreviewUrl(file, withAuth = true) {
     if (!file?.filename) return '';
+
+    // S3 파일인 경우 직접 S3 URL 사용
+    if (file.storageType === 's3' && file.s3Url) {
+      return file.s3Url;
+    }
 
     const baseUrl = `${process.env.NEXT_PUBLIC_API_URL}/api/files/view/${file.filename}`;
     

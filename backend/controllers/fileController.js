@@ -82,6 +82,56 @@ const getFileFromRequest = async (req) => {
   }
 };
 
+// S3 파일 메타데이터 저장 API
+exports.saveFileMetadata = async (req, res) => {
+  try {
+    const { filename, originalname, mimetype, size, s3Url, s3Key } = req.body;
+
+    if (!filename || !originalname || !mimetype || !size || !s3Url || !s3Key) {
+      return res.status(400).json({
+        success: false,
+        message: '필수 파일 정보가 누락되었습니다.'
+      });
+    }
+
+    const file = new File({
+      filename: filename,
+      originalname: originalname,
+      mimetype: mimetype,
+      size: size,
+      user: req.user.id,
+      s3Url: s3Url,
+      s3Key: s3Key,
+      storageType: 's3'
+    });
+
+    await file.save();
+
+    res.status(200).json({
+      success: true,
+      message: '파일 메타데이터 저장 성공',
+      file: {
+        _id: file._id,
+        filename: file.filename,
+        originalname: file.originalname,
+        mimetype: file.mimetype,
+        size: file.size,
+        s3Url: file.s3Url,
+        storageType: file.storageType,
+        uploadDate: file.uploadDate
+      }
+    });
+
+  } catch (error) {
+    console.error('File metadata save error:', error);
+    res.status(500).json({
+      success: false,
+      message: '파일 메타데이터 저장 중 오류가 발생했습니다.',
+      error: error.message
+    });
+  }
+};
+
 exports.uploadFile = async (req, res) => {
   try {
     if (!req.file) {
@@ -101,7 +151,8 @@ exports.uploadFile = async (req, res) => {
       mimetype: req.file.mimetype,
       size: req.file.size,
       user: req.user.id,
-      path: newPath
+      path: newPath,
+      storageType: 'local'
     });
 
     await file.save();
@@ -267,21 +318,25 @@ exports.deleteFile = async (req, res) => {
       });
     }
 
-    const filePath = path.join(uploadDir, file.filename);
+    // 로컬 파일 삭제
+    if (file.storageType === 'local' && file.path) {
+      const filePath = path.join(uploadDir, file.filename);
 
-    if (!isPathSafe(filePath, uploadDir)) {
-      return res.status(403).json({
-        success: false,
-        message: '잘못된 파일 경로입니다.'
-      });
+      if (!isPathSafe(filePath, uploadDir)) {
+        return res.status(403).json({
+          success: false,
+          message: '잘못된 파일 경로입니다.'
+        });
+      }
+      
+      try {
+        await fsPromises.access(filePath, fs.constants.W_OK);
+        await fsPromises.unlink(filePath);
+      } catch (unlinkError) {
+        console.error('File deletion error:', unlinkError);
+      }
     }
-    
-    try {
-      await fsPromises.access(filePath, fs.constants.W_OK);
-      await fsPromises.unlink(filePath);
-    } catch (unlinkError) {
-      console.error('File deletion error:', unlinkError);
-    }
+    // S3 파일 삭제는 별도 로직 필요 (TODO)
 
     await file.deleteOne();
 

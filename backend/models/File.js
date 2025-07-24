@@ -56,9 +56,26 @@ const FileSchema = new mongoose.Schema({
     required: true,
     index: true
   },
+  // 로컬 파일 경로 (기존 파일들을 위해 유지)
   path: { 
     type: String,
-    required: true
+    required: false
+  },
+  // S3 URL (새로운 업로드 방식)
+  s3Url: {
+    type: String,
+    required: false
+  },
+  // S3 키 (파일 삭제를 위해)
+  s3Key: {
+    type: String,
+    required: false
+  },
+  // 저장 타입 ('local' 또는 's3')
+  storageType: {
+    type: String,
+    enum: ['local', 's3'],
+    default: 's3'
   },
   uploadDate: { 
     type: Date, 
@@ -77,9 +94,12 @@ FileSchema.index({ filename: 1, user: 1 }, { unique: true });
 // 파일 삭제 전 처리
 FileSchema.pre('remove', async function(next) {
   try {
-    const fs = require('fs').promises;
-    if (this.path) {
+    if (this.storageType === 'local' && this.path) {
+      const fs = require('fs').promises;
       await fs.unlink(this.path);
+    } else if (this.storageType === 's3' && this.s3Key) {
+      // S3 파일 삭제는 별도 처리 필요
+      console.log('S3 file deletion required for key:', this.s3Key);
     }
     next();
   } catch (error) {
@@ -121,6 +141,9 @@ FileSchema.methods.getEncodedFilename = function() {
 
 // 파일 URL 생성을 위한 유틸리티 메서드
 FileSchema.methods.getFileUrl = function(type = 'download') {
+  if (this.storageType === 's3' && this.s3Url) {
+    return this.s3Url;
+  }
   return `/api/files/${type}/${encodeURIComponent(this.filename)}`;
 };
 
