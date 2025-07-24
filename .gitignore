@@ -5,6 +5,7 @@ build/
 .npmrc
 .env.local
 .env
+.env.production
 backend/uploads
 
 # Next.js
