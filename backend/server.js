@@ -107,10 +107,14 @@ app.use((err, req, res, next) => {
 
 const setupSocketIORedisAdapter = async () => {
   try {
-    console.log('🔄 Setting up Socket.IO Redis Adapter...');
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔄 Setting up Socket.IO Redis Adapter...');
+    }
     
     if (process.env.REDIS_CLUSTER_MODE === 'true') {
-      console.log('Setting up Socket.IO Redis Cluster Adapter...');
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Setting up Socket.IO Redis Cluster Adapter...');
+      }
       
       // 클러스터 노드 파싱
       let clusterNodes;
@@ -142,11 +146,15 @@ const setupSocketIORedisAdapter = async () => {
       // Socket.IO Redis Adapter 설정
       io.adapter(createAdapter(pubClient, subClient));
       
-      console.log('✅ Socket.IO Redis Cluster Adapter: Connected successfully');
+      if (process.env.NODE_ENV === 'development') {
+        console.log('✅ Socket.IO Redis Cluster Adapter: Connected successfully');
+      }
       return true;
       
     } else {
-      console.log('Setting up Socket.IO Single Redis Adapter...');
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Setting up Socket.IO Single Redis Adapter...');
+      }
       
       // 단일 Redis 모드
       const host = process.env.REDIS_HOST || '127.0.0.1';
@@ -176,12 +184,16 @@ const setupSocketIORedisAdapter = async () => {
       // Socket.IO Redis Adapter 설정
       io.adapter(createAdapter(pubClient, subClient));
       
-      console.log('✅ Socket.IO Single Redis Adapter: Connected successfully');
+      if (process.env.NODE_ENV === 'development') {
+        console.log('✅ Socket.IO Single Redis Adapter: Connected successfully');
+      }
       return true;
     }
   } catch (error) {
     console.error('❌ Failed to setup Socket.IO Redis Adapter:', error.message);
-    console.log('🔄 Using default in-memory adapter (limited to single server)');
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔄 Using default in-memory adapter (limited to single server)');
+    }
     return false;
   }
 };
@@ -190,7 +202,6 @@ const setupSocketIORedisAdapter = async () => {
 const startServer = async () => {
   try {
     console.log('🚀 SERVER VERSION: v2.2.1 - Socket.IO Redis Adapter Enabled');
-    console.log('📅 Build Time:', new Date().toISOString());
     
     // MongoDB 연결
     await mongoose.connect(process.env.MONGO_URI);
@@ -201,7 +212,7 @@ const startServer = async () => {
 
     // Socket.IO Redis Adapter 설정
     const socketIOAdapterSuccess = await setupSocketIORedisAdapter();
-    if (!socketIOAdapterSuccess) {
+    if (!socketIOAdapterSuccess && process.env.NODE_ENV === 'development') {
       console.log('🚀 Socket.IO using default in-memory adapter');
     }
 
@@ -209,14 +220,17 @@ const startServer = async () => {
     server.listen(PORT, '0.0.0.0', () => {
       console.log(`Server running on port ${PORT}`);
       console.log('Environment:', process.env.NODE_ENV);
-      console.log('API Base URL:', `http://0.0.0.0:${PORT}/api`);
       
-      // 연결 상태 요약
-      console.log('\n=== Connection Status ===');
-      console.log('MongoDB: ✅ Connected');
-      console.log('Redis (Sessions): ✅ Connected');
-      console.log(`Socket.IO: ${socketIOAdapterSuccess ? '✅ Redis Adapter (Cluster)' : '✅ In-Memory Adapter'}`);
-      console.log('=========================\n');
+      if (process.env.NODE_ENV === 'development') {
+        console.log('API Base URL:', `http://0.0.0.0:${PORT}/api`);
+        
+        // 연결 상태 요약
+        console.log('\n=== Connection Status ===');
+        console.log('MongoDB: ✅ Connected');
+        console.log('Redis (Sessions): ✅ Connected');
+        console.log(`Socket.IO: ${socketIOAdapterSuccess ? '✅ Redis Adapter (Cluster)' : '✅ In-Memory Adapter'}`);
+        console.log('=========================\n');
+      }
     });
   } catch (err) {
     console.error('❌ Server startup error:', err.message);

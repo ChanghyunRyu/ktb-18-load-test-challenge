@@ -72,7 +72,7 @@ router.get('/health', async (req, res) => {
   }
 });
 
-// 채팅방 목록 조회 (페이징 적용)
+// 채팅방 목록 조회 (페이징 적용) - 성능 최적화 버전
 router.get('/', [limiter, auth], async (req, res) => {
   try {
     // 쿼리 파라미터 검증 (페이지네이션)
@@ -90,22 +90,86 @@ router.get('/', [limiter, auth], async (req, res) => {
       : 'desc';
 
     // 검색 필터 구성
-    const filter = {};
+    const matchFilter = {};
     if (req.query.search) {
-      filter.name = { $regex: req.query.search, $options: 'i' };
+      matchFilter.name = { $regex: req.query.search, $options: 'i' };
     }
 
-    // 총 문서 수 조회
-    const totalCount = await Room.countDocuments(filter);
+    // 최적화된 Aggregation Pipeline
+    const pipeline = [
+      // 1. 필터 적용
+      { $match: matchFilter },
+      
+      // 2. Creator lookup (populate 대신)
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'creator',
+          foreignField: '_id',
+          as: 'creator',
+          pipeline: [{ $project: { name: 1, email: 1 } }]
+        }
+      },
+      
+      // 3. Participants lookup (populate 대신)
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'participants',
+          foreignField: '_id',
+          as: 'participants',
+          pipeline: [{ $project: { name: 1, email: 1 } }]
+        }
+      },
+      
+      // 4. 필드 계산 및 변환
+      {
+        $addFields: {
+          creator: { $arrayElemAt: ['$creator', 0] },
+          participantsCount: { $size: '$participants' },
+          // 현재 사용자가 방 생성자인지 확인
+          isCreator: { 
+            $eq: [
+              { $toString: { $arrayElemAt: ['$creator._id', 0] } }, 
+              req.user.id 
+            ] 
+          }
+        }
+      },
+      
+      // 5. Facet으로 count와 data를 한 번에 처리
+      {
+        $facet: {
+          data: [
+            { $sort: { [sortField]: sortOrder === 'desc' ? -1 : 1 } },
+            { $skip: skip },
+            { $limit: pageSize },
+            {
+              $project: {
+                _id: 1,
+                name: 1,
+                hasPassword: 1,
+                creator: 1,
+                participants: 1,
+                participantsCount: 1,
+                createdAt: 1,
+                isCreator: 1,
+                // password 필드는 제외
+              }
+            }
+          ],
+          count: [
+            { $count: 'total' }
+          ]
+        }
+      }
+    ];
 
-    // 채팅방 목록 조회 with 페이지네이션
-    const rooms = await Room.find(filter)
-      .populate('creator', 'name email')
-      .populate('participants', 'name email')
-      .sort({ [sortField]: sortOrder === 'desc' ? -1 : 1 })
-      .skip(skip)
-      .limit(pageSize)
-      .lean();
+    // 단일 aggregation 쿼리 실행
+    const [result] = await Room.aggregate(pipeline);
+    
+    const rooms = result.data || [];
+    const totalCount = result.count[0]?.total || 0;
 
     // 안전한 응답 데이터 구성 
     const safeRooms = rooms.map(room => {
@@ -128,7 +192,7 @@ router.get('/', [limiter, auth], async (req, res) => {
           name: p.name || '알 수 없음',
           email: p.email || ''
         })),
-        participantsCount: participants.length,
+        participantsCount: room.participantsCount || participants.length,
         createdAt: room.createdAt || new Date(),
         isCreator: creator._id?.toString() === req.user.id,
       };

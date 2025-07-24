@@ -99,6 +99,12 @@ MessageSchema.index({ type: 1 });
 MessageSchema.index({ timestamp: -1 });
 MessageSchema.index({ 'reactions.userId': 1 });
 
+// 성능 최적화: 메시지 로딩에 가장 효과적인 복합 인덱스
+MessageSchema.index({ room: 1, timestamp: -1, isDeleted: 1 });
+
+// 읽음 상태 업데이트 최적화
+MessageSchema.index({ _id: 1, 'readers.userId': 1 });
+
 // 읽음 처리 Static 메소드 개선
 MessageSchema.statics.markAsRead = async function(messageIds, userId) {
   if (!messageIds?.length || !userId) return;
