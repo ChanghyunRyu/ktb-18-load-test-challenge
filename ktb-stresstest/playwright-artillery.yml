@@ -1,0 +1,21 @@
+config:
+  target: https://chat.goorm-ktb-018.goorm.team/
+
+  phases:
+  - duration: 1
+    arrivalRate: 1
+
+  engines:
+    playwright:
+      launchOptions:
+        headless: true
+    
+  processor: "./stresstest/app.js"
+
+scenarios:
+  - engine: playwright
+    flowFunction: "generateChatAiResponse" 
+
+# module.exports = { registerUser, loginUser, createNewChat, scrollChat, sendMessageToChat, reactionToMessage, uploadFileToChat, updateProfileImage, generateChatAiResponse };
+# ✅ 성공항목 : registerUser, loginUser, createNewChat, scrollChat, updateProfileImage
+# ❌ 실패항목 : sendMessageToChat, reactionToMessage, uploadFileToChat, generateChatAiResponse
