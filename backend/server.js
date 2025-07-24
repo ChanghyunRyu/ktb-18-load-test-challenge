@@ -116,50 +116,8 @@ const startServer = async () => {
       console.error('⚠️  Redis connection failed - Server will start but session management may not work properly');
     }
 
-    // Socket.IO Redis Adapter 설정 (동적)
-    let redisAdapterConnected = false;
-    try {
-      const { createAdapter } = require('@socket.io/redis-adapter');
-      const { createClient } = require('redis');
-
-      // Redis 클라이언트 생성 (최적화)
-      const pubClient = createClient({
-        url: process.env.REDIS_URL || 'redis://localhost:6379',
-        socket: {
-          reconnectStrategy: (retries) => Math.min(retries * 50, 500),
-          connectTimeout: 5000,   // 5초로 단축
-          commandTimeout: 2000,   // 2초로 단축  
-          keepAlive: 30000       // Keep-alive 추가
-        },
-        // 연결 풀 최적화
-        lazyConnect: false,       // 즉시 연결
-        maxRetriesPerRequest: 2   // 재시도 최소화
-      });
-
-      const subClient = pubClient.duplicate();
-
-      // 연결 대기 (순차적)
-      await pubClient.connect();
-      await subClient.connect();
-
-      // Socket.IO Adapter 설정
-      io.adapter(createAdapter(pubClient, subClient));
-      
-      redisAdapterConnected = true;
-      console.log('✅ Socket.IO Redis Adapter Connected');
-      
-      // 에러 핸들링
-      pubClient.on('error', (err) => {
-        console.error('Redis pub client error:', err);
-      });
-      subClient.on('error', (err) => {
-        console.error('Redis sub client error:', err);
-      });
-
-    } catch (redisError) {
-      console.error('❌ Socket.IO Redis Adapter connection failed:', redisError);
-      console.error('⚠️  Server will start with in-memory adapter (real-time features may not work across multiple servers)');
-    }
+    // Socket.IO는 기본 in-memory adapter 사용
+    console.log('🚀 Socket.IO using default in-memory adapter');
 
     // 서버 시작
     server.listen(PORT, '0.0.0.0', () => {
@@ -171,7 +129,7 @@ const startServer = async () => {
       console.log('\n=== Connection Status ===');
       console.log('MongoDB: ✅ Connected');
       console.log(`Redis (Sessions): ${isRedisConnected ? '✅ Connected' : '❌ Disconnected'}`);
-      console.log(`Redis (Socket.IO): ${redisAdapterConnected ? '✅ Connected' : '❌ Disconnected'}`);
+      console.log('Socket.IO: ✅ In-Memory Adapter');
       console.log('=========================\n');
     });
   } catch (err) {

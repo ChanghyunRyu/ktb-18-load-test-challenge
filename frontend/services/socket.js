@@ -159,30 +159,17 @@ class SocketService {
         return;
       }
       
-      // 인증 관련 오류 처리
-      if (error.message === 'INVALID_SESSION' || error.message === 'TOKEN_EXPIRED' || 
-          error.message === 'INVALID_TOKEN' || error.message === 'USER_NOT_FOUND') {
-        console.log('[Socket] Authentication error, attempting token refresh');
+      if (error.message === 'Invalid session') {
         authService.refreshToken()
-          .then(() => {
-            console.log('[Socket] Token refreshed, attempting reconnection');
-            setTimeout(() => this.reconnect(), 1000);
-          })
-          .catch((refreshError) => {
-            console.error('[Socket] Token refresh failed:', refreshError);
+          .then(() => this.reconnect())
+          .catch(() => {
             authService.logout();
-            clearTimeout(connectionTimeout);
-            reject(new Error('AUTH_FAILED'));
+            reject(error);
           });
         return;
       }
 
-      // 네트워크 오류나 서버 오류는 재시도
-      if (this.reconnectAttempts < this.maxReconnectAttempts) {
-        console.log(`[Socket] Retrying connection (${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
-        this.reconnectAttempts++;
-      } else {
-        console.error('[Socket] Max reconnection attempts reached');
+      if (this.reconnectAttempts >= this.maxReconnectAttempts) {
         clearTimeout(connectionTimeout);
         reject(error);
       }
@@ -277,11 +264,9 @@ class SocketService {
 
   handleConnectionError(error) {
     this.reconnectAttempts++;
-    console.error(`[Socket] Connection error (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}):`, error);
+    console.error(`Connection error (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}):`, error);
 
-    // 인증 관련 오류 처리
-    if (error.message.includes('auth') || error.message.includes('token') || 
-        error.message.includes('session') || error.message.includes('AUTH_FAILED')) {
+    if (error.message.includes('auth')) {
       // 로그인되지 않은 사용자의 auth 에러는 무시
       const user = authService.getCurrentUser();
       if (!user?.token) {
@@ -289,15 +274,9 @@ class SocketService {
         return;
       }
       
-      console.log('[Socket] Authentication error, attempting token refresh');
       authService.refreshToken()
-        .then(() => {
-          console.log('[Socket] Token refreshed successfully, reconnecting');
-          this.reconnectAttempts = 0; // 인증 성공 시 재시도 횟수 초기화
-          this.reconnect();
-        })
-        .catch((refreshError) => {
-          console.error('[Socket] Token refresh failed:', refreshError);
+        .then(() => this.reconnect())
+        .catch(() => {
           authService.logout();
           // 이미 로그인 페이지에 있으면 리다이렉트하지 않음
           if (window.location.pathname !== '/') {
@@ -307,35 +286,16 @@ class SocketService {
       return;
     }
 
-    // 네트워크 오류 처리
-    if (error.message.includes('websocket error') || error.message.includes('transport')) {
-      console.log('[Socket] Transport error, switching to polling');
+    if (error.message.includes('websocket error')) {
       if (this.socket) {
         this.socket.io.opts.transports = ['polling', 'websocket'];
       }
     }
 
-    // 최대 재시도 횟수 확인
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('[Socket] Max reconnection attempts reached');
+      console.error('Max reconnection attempts reached');
       this.cleanup(CLEANUP_REASONS.MANUAL);
       this.isReconnecting = false;
-      
-      // 사용자에게 연결 실패 알림
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('socketConnectionFailed', { 
-          detail: { error, attempts: this.reconnectAttempts } 
-        }));
-      }
-    } else {
-      // 지수 백오프를 사용한 재연결 시도
-      const delay = Math.min(this.retryDelay * Math.pow(2, this.reconnectAttempts - 1), 30000);
-      console.log(`[Socket] Scheduling reconnection in ${delay}ms`);
-      setTimeout(() => {
-        if (!this.isConnected()) {
-          this.reconnect();
-        }
-      }, delay);
     }
   }
 
