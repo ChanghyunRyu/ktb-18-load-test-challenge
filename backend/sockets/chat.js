@@ -174,32 +174,7 @@ module.exports = function(io) {
         return next(new Error('USER_LOOKUP_ERROR'));
       }
 
-             // 중복 로그인 확인 (in-memory 사용)
-       const existingSocketId = connectedUsers.get(decoded.user.id);
-       if (existingSocketId && existingSocketId !== socket.id) {
-         const existingSocket = io.sockets.sockets.get(existingSocketId);
-         if (existingSocket && existingSocket.connected) {
-           console.log('Duplicate login detected, handling existing connection:', existingSocketId);
-           // 기존 연결에 알림 후 종료
-           existingSocket.emit('duplicate_login', {
-             type: 'new_login_attempt',
-             deviceInfo: socket.handshake.headers['user-agent'],
-             ipAddress: socket.handshake.address,
-             timestamp: Date.now()
-           });
-           
-           // 짧은 지연 후 기존 연결 종료
-           setTimeout(() => {
-             if (existingSocket.connected) {
-               existingSocket.emit('session_ended', {
-                 reason: 'duplicate_login',
-                 message: '다른 기기에서 로그인하여 현재 세션이 종료되었습니다.'
-               });
-               existingSocket.disconnect(true);
-             }
-           }, 1000);
-         }
-       }
+       // 중복 로그인 확인은 connection 이벤트에서만 처리
 
       // 소켓에 사용자 정보 설정
       socket.user = {
@@ -241,9 +216,13 @@ module.exports = function(io) {
     if (socket.user) {
       // 이전 연결이 있는지 확인 (in-memory 사용)
       const previousSocketId = connectedUsers.get(socket.user.id);
+      console.log(`[DEBUG] User ${socket.user.id} connecting. Previous socketId: ${previousSocketId}, new socketId: ${socket.id}`);
+      
       if (previousSocketId && previousSocketId !== socket.id) {
         const previousSocket = io.sockets.sockets.get(previousSocketId);
-        if (previousSocket) {
+        if (previousSocket && previousSocket.connected) {
+          console.log(`[DEBUG] Found active previous connection for user ${socket.user.id}, terminating it`);
+          
           // 이전 연결에 중복 로그인 알림
           previousSocket.emit('duplicate_login', {
             type: 'new_login_attempt',
@@ -254,18 +233,28 @@ module.exports = function(io) {
 
           // 이전 연결 종료 처리
           setTimeout(() => {
-            previousSocket.emit('session_ended', {
-              reason: 'duplicate_login',
-              message: '다른 기기에서 로그인하여 현재 세션이 종료되었습니다.'
-            });
-            previousSocket.disconnect(true);
+            if (previousSocket.connected) {
+              previousSocket.emit('session_ended', {
+                reason: 'duplicate_login',
+                message: '다른 기기에서 로그인하여 현재 세션이 종료되었습니다.'
+              });
+              previousSocket.disconnect(true);
+            }
           }, DUPLICATE_LOGIN_TIMEOUT);
+        } else {
+          console.log(`[DEBUG] Previous socketId ${previousSocketId} is not connected or not found, cleaning up`);
         }
       }
       
       // 새로운 연결 정보 저장 (in-memory 사용)
       connectedUsers.set(socket.user.id, socket.id);
+      console.log(`[DEBUG] Stored new connection for user ${socket.user.id} -> ${socket.id}`);
     }
+
+    // 소켓 에러 처리
+    socket.on('error', (error) => {
+      console.error(`[Socket Error] User ${socket.user?.id}, Socket ${socket.id}:`, error);
+    });
 
     // 이전 메시지 로딩 처리 개선
     socket.on('fetchPreviousMessages', async ({ roomId, before }) => {
@@ -641,15 +630,23 @@ module.exports = function(io) {
     socket.on('disconnect', async (reason) => {
       if (!socket.user) return;
 
+      console.log(`[DEBUG] User ${socket.user.id} disconnected (${reason})`);
+
       try {
         // 해당 사용자의 현재 활성 연결인 경우에만 정리 (in-memory 사용)
         const currentSocketId = connectedUsers.get(socket.user.id);
+        console.log(`[DEBUG] Current socketId in map: ${currentSocketId}, disconnecting socketId: ${socket.id}`);
+        
         if (currentSocketId === socket.id) {
           connectedUsers.delete(socket.user.id);
+          console.log(`[DEBUG] Removed user ${socket.user.id} from connectedUsers`);
         }
 
         const roomId = userRooms.get(socket.user.id);
-        userRooms.delete(socket.user.id);
+        if (roomId) {
+          userRooms.delete(socket.user.id);
+          console.log(`[DEBUG] Removed user ${socket.user.id} from userRooms (was in ${roomId})`);
+        }
 
         // 메시지 큐 정리
         const userQueues = Array.from(messageQueues.keys())
