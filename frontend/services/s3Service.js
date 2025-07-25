@@ -176,7 +176,7 @@ class S3Service {
           Key: s3Key,
           Body: file,
           ContentType: file.type,
-          ACL: 'public-read', // 프로필 이미지는 퍼블릭 접근 허용
+          // ACL 제거 - 버킷 정책으로 퍼블릭 접근 관리
         },
       });
 
@@ -242,6 +242,7 @@ class S3Service {
           Key: s3Key,
           Body: file,
           ContentType: file.type,
+          // ACL 제거 - 버킷 정책으로 퍼블릭 접근 관리
         },
       });
 
