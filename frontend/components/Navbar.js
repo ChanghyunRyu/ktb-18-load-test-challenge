@@ -13,6 +13,15 @@ const Navbar = () => {
   useEffect(() => {
     const checkAuth = () => {
       const user = authService.getCurrentUser();
+      console.log('=== Navbar 사용자 정보 확인 ===');
+      console.log('가져온 사용자:', user);
+      console.log('profileImage:', user?.profileImage);
+      console.log('profileImage 타입:', typeof user?.profileImage);
+      if (user?.profileImage) {
+        console.log('profileImage 시작 부분:', user.profileImage.substring(0, 30));
+        console.log('http로 시작하는지:', user.profileImage.startsWith('http'));
+      }
+      console.log('=============================');
       setCurrentUser(user);
     };
 
@@ -47,6 +56,29 @@ const Navbar = () => {
     await authService.logout();
     // 로그아웃 후 authStateChange 이벤트 발생
     window.dispatchEvent(new Event('authStateChange'));
+  };
+
+  // 프로필 이미지 URL 처리
+  const getProfileImageSrc = (profileImage) => {
+    console.log('=== getProfileImageSrc 처리 ===');
+    console.log('입력 profileImage:', profileImage);
+    
+    if (!profileImage) {
+      console.log('profileImage가 없음, undefined 반환');
+      return undefined;
+    }
+    
+    // 이미 완전한 URL인 경우 (S3 URL 등)
+    if (profileImage.startsWith('http')) {
+      console.log('http로 시작함, 그대로 반환:', profileImage);
+      return profileImage;
+    }
+    
+    // 로컬 파일 경로인 경우
+    const result = `${process.env.NEXT_PUBLIC_API_URL}${profileImage}`;
+    console.log('로컬 파일로 처리, 결과:', result);
+    console.log('==============================');
+    return result;
   };
 
   const isInChatRooms = router.pathname === '/chat-rooms';
@@ -109,7 +141,7 @@ const Navbar = () => {
                 <Avatar.Root
                   size="md"
                   style={{ flexShrink: 0 }}
-                  src={currentUser.profileImage ? `${process.env.NEXT_PUBLIC_API_URL}${currentUser.profileImage}` : undefined}
+                  src={getProfileImageSrc(currentUser.profileImage)}
                 >
                   <Avatar.Image />
                   <Avatar.Fallback>{currentUser.name?.[0]?.toUpperCase()}</Avatar.Fallback>

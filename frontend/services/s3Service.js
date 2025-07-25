@@ -265,6 +265,15 @@ class S3Service {
       const result = await upload.done();
 
       const s3Url = `https://${this.bucketName}.s3.${this.region}.amazonaws.com/${s3Key}`;
+      
+      console.log('=== S3 URL 생성 디버깅 ===');
+      console.log('bucketName:', this.bucketName);
+      console.log('region:', this.region);
+      console.log('s3Key:', s3Key);
+      console.log('생성된 S3 URL:', s3Url);
+      console.log('URL 검증 - https:// 시작:', s3Url.startsWith('https://'));
+      console.log('URL 검증 - s3.amazonaws.com 포함:', s3Url.includes('s3.amazonaws.com'));
+      console.log('========================');
 
       return {
         success: true,

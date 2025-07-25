@@ -119,6 +119,11 @@ const ProfileImageUpload = ({ currentImage, onImageChange }) => {
         })
       });
 
+      console.log('=== 백엔드로 보내는 데이터 ===');
+      console.log('s3Url:', uploadResult.data.s3Url);
+      console.log('s3Key:', uploadResult.data.s3Key);
+      console.log('============================');
+
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.message || '프로필 이미지 저장에 실패했습니다.');
@@ -127,14 +132,25 @@ const ProfileImageUpload = ({ currentImage, onImageChange }) => {
       const data = await response.json();
       setUploadProgress(100);
 
-      console.log('Backend response data:', data);
-      console.log('Received imageUrl:', data.imageUrl);
+      console.log('=== 백엔드 응답 데이터 ===');
+      console.log('전체 응답:', data);
+      console.log('imageUrl:', data.imageUrl);
+      console.log('imageUrl 타입:', typeof data.imageUrl);
+      console.log('URL 시작 체크:', data.imageUrl?.substring(0, 30));
+      console.log('========================');
 
       // 로컬 스토리지의 사용자 정보 업데이트
       const updatedUser = {
         ...user,
         profileImage: data.imageUrl
       };
+      
+      console.log('=== localStorage 업데이트 ===');
+      console.log('기존 user.profileImage:', user.profileImage);
+      console.log('새로운 profileImage:', data.imageUrl);
+      console.log('업데이트된 사용자 객체:', updatedUser);
+      console.log('===========================');
+      
       localStorage.setItem('user', JSON.stringify(updatedUser));
 
       // 부모 컴포넌트에 변경 알림
@@ -142,6 +158,11 @@ const ProfileImageUpload = ({ currentImage, onImageChange }) => {
 
       // 전역 이벤트 발생
       window.dispatchEvent(new Event('userProfileUpdate'));
+
+      console.log('=== 이벤트 발생 완료 ===');
+      console.log('onImageChange 호출됨:', data.imageUrl);
+      console.log('userProfileUpdate 이벤트 발생됨');
+      console.log('======================');
 
       // 미리보기 URL을 S3 URL로 업데이트
       if (objectUrl && objectUrl.startsWith('blob:')) {
