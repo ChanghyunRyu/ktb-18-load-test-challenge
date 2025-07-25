@@ -12,12 +12,47 @@ const ProfileImageUpload = ({ currentImage, onImageChange }) => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef(null);
 
+  // URL 정리 함수 - 잘못된 형식 수정
+  const cleanUrl = (url) => {
+    if (!url) return url;
+    
+    // https// -> https:// 수정
+    if (url.startsWith('https//')) {
+      return url.replace('https//', 'https://');
+    }
+    
+    // 중복된 도메인 제거
+    const domainPattern = /https:\/\/[^\/]+https:\/\//;
+    if (domainPattern.test(url)) {
+      return url.replace(/^https:\/\/[^\/]+/, '');
+    }
+    
+    return url;
+  };
+
   // 프로필 이미지 URL 생성
   const getProfileImageUrl = (imagePath) => {
+    console.log('getProfileImageUrl input:', imagePath);
+    
     if (!imagePath) return null;
-    return imagePath.startsWith('http') ? 
-      imagePath : 
-      `${process.env.NEXT_PUBLIC_API_URL}${imagePath}`;
+    
+    // URL 정리
+    const cleanedPath = cleanUrl(imagePath);
+    console.log('Cleaned URL:', cleanedPath);
+    
+    // S3 URL인 경우 그대로 반환
+    if (cleanedPath.includes('s3.amazonaws.com') || cleanedPath.startsWith('https://')) {
+      console.log('Detected S3 URL, returning as-is:', cleanedPath);
+      return cleanedPath;
+    }
+    
+    // 로컬 파일인 경우 API URL 추가
+    const result = cleanedPath.startsWith('/') ? 
+      `${process.env.NEXT_PUBLIC_API_URL}${cleanedPath}` : 
+      `${process.env.NEXT_PUBLIC_API_URL}/${cleanedPath}`;
+    
+    console.log('Generated local URL:', result);
+    return result;
   };
 
   // 컴포넌트 마운트 시 이미지 설정
@@ -87,6 +122,9 @@ const ProfileImageUpload = ({ currentImage, onImageChange }) => {
       const data = await response.json();
       setUploadProgress(100);
 
+      console.log('Backend response data:', data);
+      console.log('Received imageUrl:', data.imageUrl);
+
       // 로컬 스토리지의 사용자 정보 업데이트
       const updatedUser = {
         ...user,
@@ -104,7 +142,8 @@ const ProfileImageUpload = ({ currentImage, onImageChange }) => {
       if (objectUrl && objectUrl.startsWith('blob:')) {
         URL.revokeObjectURL(objectUrl);
       }
-      setPreviewUrl(data.imageUrl);
+      console.log('Setting preview URL to:', data.imageUrl);
+      setPreviewUrl(cleanUrl(data.imageUrl));
 
     } catch (error) {
       console.error('Image upload error:', error);

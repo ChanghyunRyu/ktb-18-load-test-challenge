@@ -61,6 +61,12 @@ class S3Service {
 
   initializeS3Client() {
     if (!this.s3Client) {
+      console.log('Initializing S3 client with:');
+      console.log('- Bucket:', this.bucketName);
+      console.log('- Region:', this.region);
+      console.log('- AccessKeyId exists:', !!this.accessKeyId);
+      console.log('- SecretAccessKey exists:', !!this.secretAccessKey);
+      
       if (!this.accessKeyId || !this.secretAccessKey || !this.bucketName) {
         throw new Error('AWS 자격증명 또는 버킷 이름이 설정되지 않았습니다.');
       }
@@ -191,6 +197,8 @@ class S3Service {
       const result = await upload.done();
 
       const s3Url = `https://${this.bucketName}.s3.${this.region}.amazonaws.com/${s3Key}`;
+      console.log('ProfileImage S3 URL generated:', s3Url);
+      console.log('Bucket:', this.bucketName, 'Region:', this.region, 'Key:', s3Key);
 
       return {
         success: true,
