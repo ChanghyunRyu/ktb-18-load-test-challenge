@@ -21,10 +21,15 @@ const ProfileImageUpload = ({ currentImage, onImageChange }) => {
       return url.replace('https//', 'https://');
     }
     
-    // 중복된 도메인 제거
-    const domainPattern = /https:\/\/[^\/]+https:\/\//;
+    // 중복된 도메인 제거 - https// 패턴도 포함
+    const domainPattern = /https:\/\/[^\/]+https:?\/?\/\//;
     if (domainPattern.test(url)) {
-      return url.replace(/^https:\/\/[^\/]+/, '');
+      // 첫 번째 도메인 부분을 제거하고 두 번째 https 부분부터 반환
+      const match = url.match(/https:\/\/[^\/]+(https:?\/?\/\/.+)/);
+      if (match && match[1]) {
+        // https// -> https:// 로 수정
+        return match[1].replace(/^https:?\/?\/\//, 'https://');
+      }
     }
     
     return url;
