@@ -135,6 +135,82 @@ class S3Service {
     return { success: true };
   }
 
+  async uploadProfileImage(file, onProgress) {
+    try {
+      // 프로필 이미지 전용 검증
+      if (!file) {
+        return { success: false, message: '파일이 선택되지 않았습니다.' };
+      }
+
+      if (!file.type.startsWith('image/')) {
+        return { success: false, message: '이미지 파일만 업로드할 수 있습니다.' };
+      }
+
+      // 프로필 이미지는 5MB 제한
+      const maxSize = 5 * 1024 * 1024; // 5MB
+      if (file.size > maxSize) {
+        return { success: false, message: '파일 크기는 5MB를 초과할 수 없습니다.' };
+      }
+
+      const user = authService.getCurrentUser();
+      if (!user?.id) {
+        return { 
+          success: false, 
+          message: '사용자 정보가 없습니다.' 
+        };
+      }
+
+      const s3Client = this.initializeS3Client();
+      const safeFilename = this.generateSafeFilename(file.name);
+      const s3Key = `profile-images/${user.id}/${safeFilename}`;
+
+      if (onProgress) {
+        onProgress(0);
+      }
+
+      // Upload 클래스를 사용하여 안정적인 업로드와 진행률 추적
+      const upload = new Upload({
+        client: s3Client,
+        params: {
+          Bucket: this.bucketName,
+          Key: s3Key,
+          Body: file,
+          ContentType: file.type,
+          ACL: 'public-read', // 프로필 이미지는 퍼블릭 접근 허용
+        },
+      });
+
+      // 진행률 추적
+      upload.on('httpUploadProgress', (progress) => {
+        if (onProgress && progress.total) {
+          const percentCompleted = Math.round((progress.loaded * 100) / progress.total);
+          onProgress(percentCompleted);
+        }
+      });
+
+      const result = await upload.done();
+
+      const s3Url = `https://${this.bucketName}.s3.${this.region}.amazonaws.com/${s3Key}`;
+
+      return {
+        success: true,
+        data: {
+          filename: safeFilename,
+          originalname: file.name,
+          mimetype: file.type,
+          size: file.size,
+          s3Url: s3Url,
+          s3Key: s3Key,
+          etag: result.ETag
+        }
+      };
+
+    } catch (error) {
+      console.error('Profile image S3 upload error:', error);
+      return this.handleUploadError(error);
+    }
+  }
+
   async uploadToS3(file, onProgress) {
     try {
       const validationResult = await this.validateFile(file);

@@ -2,12 +2,14 @@ import React, { useState, useRef, useEffect } from 'react';
 import { CameraIcon, CloseOutlineIcon } from '@vapor-ui/icons';
 import { Button, Text, Callout, IconButton } from '@vapor-ui/core';
 import authService from '../services/authService';
+import s3Service from '../services/s3Service';
 import PersistentAvatar from './common/PersistentAvatar';
 
 const ProfileImageUpload = ({ currentImage, onImageChange }) => {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef(null);
 
   // 프로필 이미지 URL 생성
@@ -41,38 +43,50 @@ const ProfileImageUpload = ({ currentImage, onImageChange }) => {
 
       setUploading(true);
       setError('');
+      setUploadProgress(0);
 
       // 파일 미리보기 생성
       const objectUrl = URL.createObjectURL(file);
       setPreviewUrl(objectUrl);
 
-      // 현재 사용자의 인증 정보 가져오기
+      // S3에 파일 업로드
+      const uploadResult = await s3Service.uploadProfileImage(file, (progress) => {
+        setUploadProgress(Math.floor(progress * 0.9)); // 90%까지는 S3 업로드
+      });
+
+      if (!uploadResult.success) {
+        throw new Error(uploadResult.message || 'S3 업로드에 실패했습니다.');
+      }
+
+      setUploadProgress(90);
+
+      // 백엔드에 메타데이터 저장
       const user = authService.getCurrentUser();
-      if (!user?.token) {
+      if (!user?.token || !user?.sessionId) {
         throw new Error('인증 정보가 없습니다.');
       }
 
-      // FormData 생성
-      const formData = new FormData();
-      formData.append('profileImage', file);
-
-      // 파일 업로드 요청
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/users/profile-image`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/users/profile-image-s3`, {
         method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           'x-auth-token': user.token,
           'x-session-id': user.sessionId
         },
-        body: formData
+        body: JSON.stringify({
+          s3Url: uploadResult.data.s3Url,
+          s3Key: uploadResult.data.s3Key
+        })
       });
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.message || '이미지 업로드에 실패했습니다.');
+        throw new Error(errorData.message || '프로필 이미지 저장에 실패했습니다.');
       }
 
       const data = await response.json();
-      
+      setUploadProgress(100);
+
       // 로컬 스토리지의 사용자 정보 업데이트
       const updatedUser = {
         ...user,
@@ -86,6 +100,12 @@ const ProfileImageUpload = ({ currentImage, onImageChange }) => {
       // 전역 이벤트 발생
       window.dispatchEvent(new Event('userProfileUpdate'));
 
+      // 미리보기 URL을 S3 URL로 업데이트
+      if (objectUrl && objectUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(objectUrl);
+      }
+      setPreviewUrl(data.imageUrl);
+
     } catch (error) {
       console.error('Image upload error:', error);
       setError(error.message);
@@ -97,6 +117,7 @@ const ProfileImageUpload = ({ currentImage, onImageChange }) => {
       }
     } finally {
       setUploading(false);
+      setUploadProgress(0);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -216,9 +237,19 @@ const ProfileImageUpload = ({ currentImage, onImageChange }) => {
       )}
 
       {uploading && (
-        <Text typography="body3" color="neutral-weak" className="text-center mt-2">
-          이미지 업로드 중...
-        </Text>
+        <div className="w-full max-w-sm mx-auto mt-2">
+          <Text typography="body3" color="neutral-weak" className="text-center">
+            이미지 업로드 중... {uploadProgress > 0 && `${uploadProgress}%`}
+          </Text>
+          {uploadProgress > 0 && (
+            <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
+              <div 
+                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${uploadProgress}%` }}
+              ></div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

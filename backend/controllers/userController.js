@@ -169,7 +169,52 @@ exports.updateProfile = async (req, res) => {
   }
 };
 
-// 프로필 이미지 업로드
+// S3 프로필 이미지 메타데이터 저장
+exports.saveProfileImageMetadata = async (req, res) => {
+  try {
+    const { s3Url, s3Key } = req.body;
+
+    if (!s3Url || !s3Key) {
+      return res.status(400).json({
+        success: false,
+        message: '필수 이미지 정보가 누락되었습니다.'
+      });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: '사용자를 찾을 수 없습니다.'
+      });
+    }
+
+    // 기존 프로필 이미지가 S3 파일이라면 나중에 삭제 처리 가능 (TODO)
+    // if (user.profileImage && user.profileImage.includes('s3.amazonaws.com')) {
+    //   // S3 파일 삭제 로직 추가 가능
+    // }
+
+    // 새 S3 URL로 업데이트
+    user.profileImage = s3Url;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: '프로필 이미지가 업데이트되었습니다.',
+      imageUrl: user.profileImage
+    });
+
+  } catch (error) {
+    console.error('Profile image metadata save error:', error);
+    res.status(500).json({
+      success: false,
+      message: '프로필 이미지 업데이트 중 오류가 발생했습니다.',
+      error: error.message
+    });
+  }
+};
+
+// 프로필 이미지 업로드 (로컬 저장 방식 - 레거시)
 exports.uploadProfileImage = async (req, res) => {
   try {
     if (!req.file) {

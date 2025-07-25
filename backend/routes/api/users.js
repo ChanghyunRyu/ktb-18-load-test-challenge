@@ -21,11 +21,17 @@ router.put('/profile',
   userController.updateProfile
 );
 
-// 프로필 이미지 업로드
+// 프로필 이미지 업로드 (로컬 저장)
 router.post('/profile-image',
   auth,
   upload.single('profileImage'),
   userController.uploadProfileImage
+);
+
+// S3 프로필 이미지 메타데이터 저장
+router.post('/profile-image-s3',
+  auth,
+  userController.saveProfileImageMetadata
 );
 
 // 프로필 이미지 삭제
